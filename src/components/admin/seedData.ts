@@ -16,6 +16,7 @@ export interface AdminUser {
   spentThisMonth: number;
   totalSpent: number;
   activityHistory: { date: string; action: string; details: string }[];
+  role?: string;
 }
 
 export interface Subscription {

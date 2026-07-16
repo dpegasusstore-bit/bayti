@@ -22,6 +22,7 @@ import {
   LayoutDashboard, Users, Award, BarChart3, Bell, Settings, LogOut, 
   ShieldAlert, Sparkles, Home, ShieldCheck, ChevronLeft, HelpCircle, Lock
 } from 'lucide-react';
+import { api } from '../../services/api';
 
 export default function AdminPortal() {
   // --- Standard Client-side SPA Router ---
@@ -46,7 +47,8 @@ export default function AdminPortal() {
   // --- Session & Security Check ---
   const [adminSession, setAdminSession] = useState<{ email: string; loggedInAt: string; role: string } | null>(() => {
     const stored = localStorage.getItem('bayti_admin_session');
-    return stored ? JSON.parse(stored) : null;
+    const token = localStorage.getItem('bayti_admin_token');
+    return stored && token ? JSON.parse(stored) : null;
   });
 
   const handleLoginSuccess = (email: string) => {
@@ -70,65 +72,106 @@ export default function AdminPortal() {
       addAuditLogDirect('تسجيل خروج آمن للمسؤول من اللوحة', 'Info', adminSession.email);
     }
     localStorage.removeItem('bayti_admin_session');
+    localStorage.removeItem('bayti_admin_token');
     setAdminSession(null);
     navigateTo('/admin/login');
   };
 
   // --- Persisted State Engines ---
-  const [users, setUsers] = useState<AdminUser[]>(() => {
-    const stored = localStorage.getItem('bayti_admin_users');
-    return stored ? JSON.parse(stored) : INITIAL_ADMIN_USERS;
-  });
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(INITIAL_SUBSCRIPTIONS);
+  const [feedback, setFeedback] = useState<FeedbackTicket[]>(INITIAL_FEEDBACK);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [contentItems, setContentItems] = useState<ContentItem[]>(INITIAL_CONTENT);
+  const [featureFlags, setFeatureFlags] = useState(INITIAL_FEATURE_FLAGS);
+  
+  const [subscriptionRequests, setSubscriptionRequests] = useState<any[]>([]);
+  const [systemConfig, setSystemConfig] = useState<any>(null);
 
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => {
-    const stored = localStorage.getItem('bayti_admin_subscriptions');
-    return stored ? JSON.parse(stored) : INITIAL_SUBSCRIPTIONS;
-  });
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [adminStats, setAdminStats] = useState<any>(null);
 
-  const [feedback, setFeedback] = useState<FeedbackTicket[]>(() => {
-    const stored = localStorage.getItem('bayti_admin_feedback');
-    return stored ? JSON.parse(stored) : INITIAL_FEEDBACK;
-  });
+  const fetchAdminData = async () => {
+    if (!adminSession) return;
+    setLoadingStats(true);
+    try {
+      const res = await api.getAdminStats();
+      if (res.success) {
+        setAdminStats(res.stats);
+        setSystemConfig(res.systemConfig);
+        setSubscriptionRequests(res.subscriptionRequests || []);
+        
+        // Map backend users to AdminPortal users list format
+        const mappedUsers = res.users.map((u: any) => ({
+          id: u.id,
+          name: u.fullName || 'مستخدم بيت AI',
+          email: u.email,
+          role: u.role,
+          subscription: u.subscription,
+          joinedDate: new Date(u.createdDate).toISOString().split('T')[0],
+          status: u.verified ? 'Active' : 'Pending',
+          phone: u.phone,
+          country: u.country,
+          currency: u.currency,
+          activeSessionsCount: u.activeSessionsCount,
+          totalExpensesSpent: u.totalExpensesSpent,
+          plan: u.subscription === 'Premium' ? 'Premium' : 'Free'
+        }));
+        setUsers(mappedUsers);
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
-    const stored = localStorage.getItem('bayti_admin_audit_logs');
-    return stored ? JSON.parse(stored) : INITIAL_AUDIT_LOGS;
-  });
+        // Update subscriptions list for view
+        const subList: Subscription[] = res.users
+          .filter((u: any) => u.subscription === 'Premium')
+          .map((u: any, index: number) => ({
+            id: 'sub_' + u.id,
+            userName: u.fullName || 'مستخدم بيت AI',
+            userEmail: u.email,
+            planName: 'عضوية بريميوم العائلية',
+            price: 249,
+            status: 'Active',
+            startDate: new Date(u.createdDate).toISOString().split('T')[0],
+            renewalDate: new Date(new Date(u.createdDate).setMonth(new Date(u.createdDate).getMonth() + 1)).toISOString().split('T')[0]
+          }));
+        setSubscriptions(subList.length > 0 ? subList : INITIAL_SUBSCRIPTIONS);
 
-  const [contentItems, setContentItems] = useState<ContentItem[]>(() => {
-    const stored = localStorage.getItem('bayti_admin_content');
-    return stored ? JSON.parse(stored) : INITIAL_CONTENT;
-  });
+        // Map backend login history to AdminPortal auditLogs list format
+        const mappedLogs = res.logs.map((l: any, idx: number) => ({
+          id: l.id || 'log_' + idx,
+          timestamp: new Date(l.loginDate).toISOString().replace('T', ' ').substring(0, 19),
+          adminEmail: l.email,
+          action: `تسجيل دخول (${l.fullName}) - نظام ${l.platform} جهاز ${l.device} موقع ${l.country}`,
+          ipAddress: l.ip || '127.0.0.1',
+          severity: l.role === 'ADMIN' || l.role === 'SUPER_ADMIN' ? 'Critical' : 'Info'
+        }));
+        setAuditLogs(mappedLogs);
+      }
+    } catch (err) {
+      console.error('Failed to load admin stats:', err);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
 
-  const [featureFlags, setFeatureFlags] = useState(() => {
-    const stored = localStorage.getItem('bayti_admin_feature_flags');
-    return stored ? JSON.parse(stored) : INITIAL_FEATURE_FLAGS;
-  });
-
-  // Sync to local storage
   useEffect(() => {
-    localStorage.setItem('bayti_admin_users', JSON.stringify(users));
-  }, [users]);
+    if (adminSession) {
+      fetchAdminData();
+    }
+  }, [adminSession]);
 
-  useEffect(() => {
-    localStorage.setItem('bayti_admin_subscriptions', JSON.stringify(subscriptions));
-  }, [subscriptions]);
-
-  useEffect(() => {
-    localStorage.setItem('bayti_admin_feedback', JSON.stringify(feedback));
-  }, [feedback]);
-
-  useEffect(() => {
-    localStorage.setItem('bayti_admin_audit_logs', JSON.stringify(auditLogs));
-  }, [auditLogs]);
-
-  useEffect(() => {
-    localStorage.setItem('bayti_admin_content', JSON.stringify(contentItems));
-  }, [contentItems]);
-
-  useEffect(() => {
-    localStorage.setItem('bayti_admin_feature_flags', JSON.stringify(featureFlags));
-  }, [featureFlags]);
+  const handleUpdateUserStatusAndRole = async (targetUserId: string, role?: string, subscription?: string) => {
+    try {
+      const res = await api.adminUpdateUser({ targetUserId, role, subscription });
+      if (res.success) {
+        addAuditLogDirect(`تحديث العميل ${targetUserId}: دور (${role || 'بدون تغيير'})، اشتراك (${subscription || 'بدون تغيير'})`, 'Info', adminSession?.email || 'admin@bayti-ai.com');
+        await fetchAdminData();
+      } else {
+        alert(res.error || 'فشل التحديث من الخادم.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ بالاتصال بالخادم المالي.');
+    }
+  };
 
   // Add log helper
   const addAuditLog = (action: string, severity: 'Info' | 'Warning' | 'Critical') => {
@@ -231,7 +274,18 @@ export default function AdminPortal() {
         return (
           <UserManagementView 
             users={users} 
-            onUpdateUsers={setUsers} 
+            onUpdateUsers={(updated) => {
+              const changed = updated.find(u => {
+                const orig = users.find(o => o.id === u.id);
+                return orig && (orig.status !== u.status || orig.role !== u.role || orig.plan !== u.plan);
+              });
+              if (changed) {
+                const targetSub = changed.plan === 'Premium' ? 'Premium' : 'Standard';
+                handleUpdateUserStatusAndRole(changed.id, changed.role, targetSub);
+              } else {
+                setUsers(updated);
+              }
+            }} 
             onAddAuditLog={addAuditLog} 
           />
         );
@@ -240,8 +294,22 @@ export default function AdminPortal() {
           <PremiumManagementView 
             subscriptions={subscriptions} 
             users={users}
+            subscriptionRequests={subscriptionRequests}
+            systemConfig={systemConfig}
+            onRefreshData={fetchAdminData}
             onUpdateSubscriptions={setSubscriptions} 
-            onUpdateUsers={setUsers}
+            onUpdateUsers={(updated) => {
+              const changed = updated.find(u => {
+                const orig = users.find(o => o.id === u.id);
+                return orig && (orig.status !== u.status || orig.role !== u.role || orig.plan !== u.plan);
+              });
+              if (changed) {
+                const targetSub = changed.plan === 'Premium' ? 'Premium' : 'Standard';
+                handleUpdateUserStatusAndRole(changed.id, changed.role, targetSub);
+              } else {
+                setUsers(updated);
+              }
+            }}
             onAddAuditLog={addAuditLog} 
           />
         );

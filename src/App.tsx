@@ -30,6 +30,8 @@ import PremiumModal from './components/PremiumModal';
 import SmartExportModal from './components/SmartExportModal';
 import AdminPortal from './components/admin/AdminPortal';
 import PWAInstallDialog from './components/PWAInstallDialog';
+import UserAuth from './components/UserAuth';
+import { api } from './services/api';
 
 export default function App() {
   const [pathname, setPathname] = useState(window.location.pathname);
@@ -83,6 +85,86 @@ export default function App() {
   const [smartNotifications, setSmartNotifications] = useState<SmartNotification[]>([]);
 
   const [loadingInsights, setLoadingInsights] = useState(false);
+
+  // Authentication & Session States
+  const [userToken, setUserToken] = useState<string | null>(() => localStorage.getItem('bayti_user_token'));
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+
+  // 1. Session check and remote database pull on startup
+  useEffect(() => {
+    async function checkAuth() {
+      if (userToken) {
+        try {
+          const res = await api.getMe();
+          if (res.success) {
+            setCurrentUser(res.user);
+            setUserProfile(res.profile);
+            setOnboardingCompleted(res.onboarding?.onboardingCompleted);
+            if (res.profile?.fullName) {
+              setCurrentMemberName(res.profile.fullName);
+            }
+
+            // Pull active records from the persistent cloud database
+            const dataRes = await api.pullData();
+            if (dataRes.success) {
+              if (dataRes.expenses && dataRes.expenses.length > 0) {
+                setExpenses(dataRes.expenses);
+              }
+              if (dataRes.familyMembers && dataRes.familyMembers.length > 0) {
+                setFamilyMembers(dataRes.familyMembers);
+              }
+              if (dataRes.reminders && dataRes.reminders.length > 0) {
+                setReminders(dataRes.reminders);
+              }
+              if (dataRes.notifications && dataRes.notifications.length > 0) {
+                setSmartNotifications(dataRes.notifications);
+              }
+            }
+          } else {
+            // Token expired or invalid
+            localStorage.removeItem('bayti_user_token');
+            setUserToken(null);
+          }
+        } catch (e) {
+          console.error('Failed to verify session on startup:', e);
+        }
+      }
+      setAuthChecked(true);
+    }
+    checkAuth();
+  }, [userToken]);
+
+  // 2. Automatic cloud-database synchronization when local state modifications occur
+  useEffect(() => {
+    if (userToken && authChecked && currentUser) {
+      const syncTimeout = setTimeout(async () => {
+        try {
+          await api.syncData({
+            expenses,
+            familyMembers,
+            reminders,
+            notifications: smartNotifications,
+            onboarding: {
+              onboardingCompleted,
+              salary: monthlyBudget,
+              otherIncome: 0,
+              familyMembersCount: familyMembers.length || 1,
+              ownsCar: false,
+              paysInstallments: false,
+              participatesInGroup: false,
+              homeStatus: 'own',
+              wantsGoals: true
+            }
+          });
+        } catch (e) {
+          console.error('Failed to auto-sync with server:', e);
+        }
+      }, 1000); // Debounce sync by 1 second to minimize requests
+      return () => clearTimeout(syncTimeout);
+    }
+  }, [expenses, familyMembers, reminders, smartNotifications, onboardingCompleted, userToken, authChecked, currentUser]);
 
   // Load from LocalStorage for durable offline-friendly client state!
   useEffect(() => {
@@ -449,6 +531,39 @@ export default function App() {
     localStorage.setItem('bayti_smart_notifications', JSON.stringify(updated));
   };
 
+  const handleLogout = async () => {
+    await api.logout();
+    setUserToken(null);
+    setCurrentUser(null);
+    setUserProfile(null);
+    setOnboardingCompleted(false);
+    // Clear dynamic states
+    setExpenses([]);
+    setFamilyMembers([]);
+    setReminders([]);
+    setSmartNotifications([]);
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  const handleDeleteAccount = async () => {
+    const res = await api.deleteAccount();
+    if (res.success) {
+      setUserToken(null);
+      setCurrentUser(null);
+      setUserProfile(null);
+      setOnboardingCompleted(false);
+      setExpenses([]);
+      setFamilyMembers([]);
+      setReminders([]);
+      setSmartNotifications([]);
+      localStorage.clear();
+      window.location.reload();
+    } else {
+      alert(res.error || 'حدث خطأ أثناء محاولة حذف الحساب.');
+    }
+  };
+
   const handleResetData = () => {
     localStorage.removeItem('bayti_expenses');
     localStorage.removeItem('bayti_members');
@@ -523,6 +638,22 @@ export default function App() {
     );
   }
 
+  if (!userToken) {
+    return (
+      <UserAuth 
+        onLoginSuccess={(token, user, profile, onboarding) => {
+          setUserToken(token);
+          setCurrentUser(user);
+          setUserProfile(profile);
+          setOnboardingCompleted(onboarding?.onboardingCompleted);
+          if (profile?.fullName) {
+            setCurrentMemberName(profile.fullName);
+          }
+        }} 
+      />
+    );
+  }
+
   if (!onboardingCompleted) {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
@@ -532,12 +663,12 @@ export default function App() {
       
       {/* App Top Glass Header */}
       <AppHeader
-        userEmail="d.pegasus.store@gmail.com"
+        userEmail={currentUser?.email || "d.pegasus.store@gmail.com"}
         isPremium={isPremium}
         notificationsCount={smartNotifications.filter(n => !n.isRead && !n.isArchived).length}
         onOpenNotifications={() => setShowNotifications(true)}
-        userName={onboardingData?.name}
-        userAvatar={onboardingData?.avatar}
+        userName={userProfile?.fullName || onboardingData?.name || currentUser?.email}
+        userAvatar={userProfile?.profilePicture || onboardingData?.avatar || "👨🏻‍💼"}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => {
           const next = !isDarkMode;
@@ -640,7 +771,11 @@ export default function App() {
             isPremium={isPremium}
             onTogglePremium={handleTogglePremium}
             onResetData={handleResetData}
-            userEmail="d.pegasus.store@gmail.com"
+            userEmail={currentUser?.email || "d.pegasus.store@gmail.com"}
+            currentUser={currentUser}
+            userProfile={userProfile}
+            onLogout={handleLogout}
+            onDeleteAccount={handleDeleteAccount}
             isPasscodeEnabled={isPasscodeEnabled}
             onTogglePasscode={handleTogglePasscode}
             isFaceIdEnabled={isFaceIdEnabled}

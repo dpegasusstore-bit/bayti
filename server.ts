@@ -12,8 +12,83 @@ import { GoogleGenAI, Type } from '@google/genai';
 // Initialize environment variables
 dotenv.config();
 
+import { registerAuthRoutes, getSessionFromRequest } from './auth-routes.js';
+import { seedAdminUser, readDb, writeDb } from './db-store.js';
+
+// Middleware to verify AI usage limits per user
+async function verifyAiLimits(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجدداً.' });
+    }
+
+    const db = readDb();
+    const profile = db.profiles.find(p => p.userId === session.userId);
+    if (!profile) {
+      return res.status(404).json({ success: false, error: 'الملف الشخصي غير موجود.' });
+    }
+
+    // If Premium, they have UNLIMITED usage!
+    if (profile.subscription === 'Premium') {
+      return next();
+    }
+
+    // Check reset date for FREE tier (Standard)
+    const now = new Date();
+    const limitReset = new Date(profile.limitResetDate || '');
+    
+    if (!profile.limitResetDate || limitReset < now) {
+      // It has been more than a month since reset date, reset usage count!
+      profile.aiUsageCount = 0;
+      const nextReset = new Date();
+      nextReset.setMonth(nextReset.getMonth() + 1);
+      profile.limitResetDate = nextReset.toISOString();
+      writeDb(db);
+    }
+
+    const currentCount = profile.aiUsageCount || 0;
+    if (currentCount >= 20) {
+      return res.status(429).json({
+        success: false,
+        limitReached: true,
+        error: 'لقد استنفدت الحد الأقصى المجاني (20 عملية ذكاء اصطناعي شهرياً).\n\nقم بالترقية للباقة الممتازة Premium للتمتع باستخدام لانهائي وميزات متقدمة فوراً!'
+      });
+    }
+
+    // Store user ID to increment usage after successful operation
+    (req as any).userProfileId = session.userId;
+    next();
+  } catch (err) {
+    console.error('Error verifying AI limits:', err);
+    res.status(500).json({ success: false, error: 'حدث خطأ أثناء فحص حدود الاستخدام للذكاء الاصطناعي.' });
+  }
+}
+
+// Helper to increment AI usage
+function incrementAiUsage(userId: string | undefined) {
+  if (!userId) return;
+  try {
+    const db = readDb();
+    const profile = db.profiles.find(p => p.userId === userId);
+    if (profile && profile.subscription !== 'Premium') {
+      profile.aiUsageCount = (profile.aiUsageCount || 0) + 1;
+      writeDb(db);
+      console.log(`[AI Limit] Incremented usage for user ${userId}. New count: ${profile.aiUsageCount}`);
+    }
+  } catch (err) {
+    console.error('Failed to increment AI usage count:', err);
+  }
+}
+
+// Seed administrator account on launch
+seedAdminUser();
+
 const app = express();
 const PORT = 3000;
+
+// Register authentication & user management REST APIs
+registerAuthRoutes(app);
 
 // Enable large bodies for receipt photos and voice files
 app.use(express.json({ limit: '50mb' }));
@@ -83,7 +158,7 @@ const expenseExtractionSchema = {
 };
 
 // 1. Parse Arabic Natural Text Input
-app.post('/api/ai/parse-text', async (req, res) => {
+app.post('/api/ai/parse-text', verifyAiLimits, async (req, res) => {
   try {
     const { text, recordedBy } = req.body;
     if (!text) {
@@ -138,6 +213,7 @@ app.post('/api/ai/parse-text', async (req, res) => {
       tags: parsedData.tags || [],
     };
 
+    incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, expense });
   } catch (error: any) {
     console.error('Error in parse-text:', error);
@@ -146,7 +222,7 @@ app.post('/api/ai/parse-text', async (req, res) => {
 });
 
 // 2. Parse Receipt Photos (OCR + Structure)
-app.post('/api/ai/parse-receipt', async (req, res) => {
+app.post('/api/ai/parse-receipt', verifyAiLimits, async (req, res) => {
   try {
     const { image, recordedBy } = req.body;
     if (!image) {
@@ -211,6 +287,7 @@ app.post('/api/ai/parse-receipt', async (req, res) => {
       tags: parsedData.tags || [],
     };
 
+    incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, expense });
   } catch (error: any) {
     console.error('Error in parse-receipt:', error);
@@ -219,7 +296,7 @@ app.post('/api/ai/parse-receipt', async (req, res) => {
 });
 
 // 3. Parse Natural Voice Input
-app.post('/api/ai/parse-voice', async (req, res) => {
+app.post('/api/ai/parse-voice', verifyAiLimits, async (req, res) => {
   try {
     const { audio, mimeType, recordedBy } = req.body;
     if (!audio) {
@@ -277,6 +354,7 @@ app.post('/api/ai/parse-voice', async (req, res) => {
       tags: parsedData.tags || [],
     };
 
+    incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, expense });
   } catch (error: any) {
     console.error('Error in parse-voice:', error);
@@ -285,7 +363,7 @@ app.post('/api/ai/parse-voice', async (req, res) => {
 });
 
 // 4. Generate Family Financial Insights & Smart Advice
-app.post('/api/ai/generate-insights', async (req, res) => {
+app.post('/api/ai/generate-insights', verifyAiLimits, async (req, res) => {
   try {
     const { expenses, familyMembers, monthlyBudget } = req.body;
     
@@ -356,6 +434,7 @@ app.post('/api/ai/generate-insights', async (req, res) => {
       date: new Date().toISOString().split('T')[0],
     }));
 
+    incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, insights: formattedInsights });
   } catch (error: any) {
     console.error('Error generating insights:', error);
@@ -365,7 +444,7 @@ app.post('/api/ai/generate-insights', async (req, res) => {
 
 
 // 5. AI Advisor Multi-turn Financial Chat with Advanced Financial Brain
-app.post('/api/ai/chat', async (req, res) => {
+app.post('/api/ai/chat', verifyAiLimits, async (req, res) => {
   try {
     const { 
       message, 
@@ -478,6 +557,7 @@ app.post('/api/ai/chat', async (req, res) => {
     });
 
     const reply = response.text.trim();
+    incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, reply });
   } catch (error: any) {
     console.error('Error in /api/ai/chat:', error);

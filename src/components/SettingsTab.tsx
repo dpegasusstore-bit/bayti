@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   RefreshCw, 
@@ -26,9 +26,15 @@ import {
   FileText,
   Mail,
   ShieldAlert,
-  Fingerprint
+  Fingerprint,
+  Phone,
+  Settings,
+  Trash2,
+  Tv,
+  Zap
 } from 'lucide-react';
 import { formatCurrency } from '../utils';
+import { api } from '../services/api';
 
 interface SettingsTabProps {
   monthlyBudget: number;
@@ -37,6 +43,10 @@ interface SettingsTabProps {
   onTogglePremium: () => void;
   onResetData: () => void;
   userEmail: string;
+  currentUser?: any;
+  userProfile?: any;
+  onLogout?: () => void;
+  onDeleteAccount?: () => void;
   
   // Phase 6 variables & handlers
   isPasscodeEnabled: boolean;
@@ -60,6 +70,10 @@ export default function SettingsTab({
   onTogglePremium,
   onResetData,
   userEmail,
+  currentUser,
+  userProfile,
+  onLogout,
+  onDeleteAccount,
   isPasscodeEnabled,
   onTogglePasscode,
   isFaceIdEnabled,
@@ -79,6 +93,78 @@ export default function SettingsTab({
   const [restoreSuccess, setRestoreSuccess] = useState(false);
   const [restoreError, setRestoreError] = useState('');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  // Profile management & Sessions
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [fullNameInput, setFullNameInput] = useState(userProfile?.fullName || '');
+  const [phoneInput, setPhoneInput] = useState(userProfile?.phone || '');
+  const [passInput, setPassInput] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loginHistory, setLoginHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function fetchSessions() {
+      try {
+        const res = await api.getSessions();
+        if (res.success) {
+          setSessions(res.activeSessions || []);
+          setLoginHistory(res.loginHistory || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch sessions:', err);
+      }
+    }
+    fetchSessions();
+  }, []);
+
+  const handleUpdateProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+    if (!fullNameInput) {
+      setProfileError('الاسم الكامل مطلوب.');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const res = await api.updateProfile({
+        fullName: fullNameInput,
+        phone: phoneInput,
+        password: passInput || undefined
+      });
+      if (res.success) {
+        setProfileSuccess('تم تحديث بيانات ملفك الشخصي وكلمة المرور بنجاح!');
+        setIsEditingProfile(false);
+        setPassInput('');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      } else {
+        setProfileError(res.error || 'فشل التحديث.');
+      }
+    } catch (err) {
+      setProfileError('حدث خطأ بالاتصال بالخادم المالي.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleTerminateOtherSessions = async () => {
+    if (confirm('هل تود إنهاء كافة جلسات الأجهزة النشطة الأخرى؟ سيتم تسجيل الخروج منها فوراً.')) {
+      try {
+        const res = await api.logoutAllDevices();
+        if (res.success) {
+          alert('تم إنهاء الجلسات الأخرى بنجاح.');
+          window.location.reload();
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
 
   // FAQs data list
   const faqs = [
@@ -170,21 +256,254 @@ export default function SettingsTab({
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">قم بتهيئة ميزانية البيت، تفعيل التشفير، وإدارة محفظة العائلة</p>
       </div>
 
-      {/* 1. Account Info (Private Banker Card style) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-sm flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl font-bold border border-blue-100 dark:border-slate-700">
-            👨🏻‍💼
+      {/* 1. Account Info & Profile Management (Private Banker Dashboard) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-sm space-y-6">
+        
+        {/* Top Header Row */}
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl font-bold border border-blue-100 dark:border-slate-700">
+              {userProfile?.profilePicture || '👨🏻‍💼'}
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-800 dark:text-white">{userProfile?.fullName || 'مستخدم بيت AI'}</h3>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">{userEmail}</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm font-bold text-slate-800 dark:text-white">{userEmail || 'd.pegasus.store@gmail.com'}</h3>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">الحساب المالي الأساسي للمنزل</p>
+          <div className="flex flex-col items-end gap-1">
+            <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-[10px] font-black px-2.5 py-1 rounded-full border border-emerald-100 dark:border-emerald-900/40 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>حساب مفعل</span>
+            </span>
+            <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase bg-blue-50 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+              عضوية {userProfile?.subscription === 'Premium' ? 'بريميوم التلقائية' : 'عادية'}
+            </span>
           </div>
         </div>
-        <div className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold px-2.5 py-1 rounded-full border border-emerald-100 dark:border-emerald-900/40 flex items-center gap-1">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span>مؤمن بالكامل</span>
+
+        {/* Profile Attributes List */}
+        <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-600 dark:text-slate-400">
+          <div className="space-y-1 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-50/50 dark:border-slate-800/30">
+            <span className="text-[10px] font-black text-slate-400 block">رقم الهاتف</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200">{userProfile?.phone || 'غير مسجل'}</span>
+          </div>
+          <div className="space-y-1 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-50/50 dark:border-slate-800/30">
+            <span className="text-[10px] font-black text-slate-400 block">موقع الإقامة المعتمد</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200">{userProfile?.country || 'مصر'}</span>
+          </div>
         </div>
+
+        {/* Action triggers */}
+        <div className="flex items-center justify-between pt-1">
+          <button
+            onClick={() => setIsEditingProfile(!isEditingProfile)}
+            className="text-xs font-black text-blue-600 hover:text-blue-700 flex items-center gap-1.5 transition-all bg-blue-50 hover:bg-blue-100 dark:bg-slate-800/50 px-4 py-2.5 rounded-xl border border-blue-50 dark:border-slate-800"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>تعديل الملف وتغيير كلمة المرور</span>
+          </button>
+
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="text-xs font-black text-rose-600 hover:text-rose-700 flex items-center gap-1.5 transition-all bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 px-4 py-2.5 rounded-xl border border-rose-50 dark:border-rose-900/10"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>تسجيل الخروج</span>
+            </button>
+          )}
+        </div>
+
+        {/* Profile Editing Form */}
+        {isEditingProfile && (
+          <form onSubmit={handleUpdateProfileSubmit} className="space-y-4 border-t border-slate-100 dark:border-slate-800/80 pt-4 animate-fade-in">
+            <h4 className="text-xs font-black text-slate-800 dark:text-slate-200">تحديث البيانات الشخصية</h4>
+            
+            {profileError && (
+              <p className="text-rose-600 text-[10px] font-bold">{profileError}</p>
+            )}
+            {profileSuccess && (
+              <p className="text-emerald-600 text-[10px] font-bold">{profileSuccess}</p>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">الاسم الكامل</label>
+                <input
+                  type="text"
+                  value={fullNameInput}
+                  onChange={(e) => setFullNameInput(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">رقم الهاتف</label>
+                <input
+                  type="tel"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">تحديث كلمة المرور (اتركه فارغاً للاحتفاظ بالحالية)</label>
+              <input
+                type="password"
+                value={passInput}
+                onChange={(e) => setPassInput(e.target.value)}
+                placeholder="أدخل كلمة مرور جديدة..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingProfile}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5"
+            >
+              {savingProfile ? 'جاري الحفظ...' : 'حفظ التغييرات ومزامنة الحساب'}
+            </button>
+          </form>
+        )}
+
+        {/* Active Devices / Sessions Panel */}
+        <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <h4 className="text-xs font-black text-slate-800 dark:text-white flex items-center gap-1.5">
+              <Tv className="w-4 h-4 text-indigo-600" />
+              <span>الأجهزة النشطة وجلسات الدخول ({sessions.length})</span>
+            </h4>
+            {sessions.length > 1 && (
+              <button
+                onClick={handleTerminateOtherSessions}
+                className="text-[10px] font-black text-red-600 hover:text-red-700"
+              >
+                إنهاء الجلسات الأخرى 🗑️
+              </button>
+            )}
+          </div>
+          
+          <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+            {sessions.map((sess) => (
+              <div key={sess.id} className="bg-slate-50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-slate-50 dark:border-slate-800 flex justify-between items-center text-[10px]">
+                <div className="space-y-0.5">
+                  <span className="font-bold text-slate-700 dark:text-slate-300 block">{sess.device} ({sess.platform})</span>
+                  <span className="text-slate-400 font-mono block">IP: {sess.ip} • Browser: {sess.browser}</span>
+                </div>
+                <div className="text-right">
+                  {sess.isActive ? (
+                    <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-0.5">
+                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                      الجهاز الحالي نشط
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 font-medium">منتهي</span>
+                  )}
+                  <span className="text-slate-400 font-mono text-[9px] block mt-0.5">{new Date(sess.createdAt).toLocaleDateString('ar-EG')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Delete Account Danger Button */}
+        {onDeleteAccount && (
+          <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 flex justify-between items-center">
+            <div>
+              <h4 className="text-xs font-black text-rose-600 dark:text-rose-400">حذف الحساب نهائياً</h4>
+              <p className="text-[9px] text-slate-400 mt-0.5">سيتم مسح كافة مصروفاتك وعائلتك المسجلة بالسحابة فوراً.</p>
+            </div>
+            <button
+              onClick={onDeleteAccount}
+              className="text-xs font-black text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-500/20 px-3.5 py-2 rounded-xl transition-all flex items-center gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>إغلاق وحذف الحساب</span>
+            </button>
+          </div>
+        )}
+
+      </div>
+
+      {/* Premium & AI Limits Status Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <h3 className="text-sm font-bold text-slate-800 dark:text-white">باقة العائلة ومستوى استخدام الذكاء الاصطناعي</h3>
+          </div>
+          <span className={`text-[10px] font-black px-2.5 py-1 rounded-full ${
+            userProfile?.subscription === 'Premium' 
+              ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30'
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+          }`}>
+            {userProfile?.subscription === 'Premium' ? 'الباقة الممتازة (Premium)' : 'الباقة المجانية (Free)'}
+          </span>
+        </div>
+
+        {userProfile?.subscription === 'Premium' ? (
+          <div className="space-y-3">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+              شكرًا لكونك جزءًا من العصر الذهبي للبيت المالي! حسابك يتمتع الآن بصلاحيات الذكاء الاصطناعي وقراءة الفواتير وتصدير البيانات بالكامل وبشكل لانهائي ومفتوح.
+            </p>
+            <div className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-2xl flex justify-between items-center text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+              <span>تاريخ التجديد/الانتهاء القادم:</span>
+              <span>
+                {userProfile?.subscriptionExpiryDate 
+                  ? new Date(userProfile.subscriptionExpiryDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
+                  : 'لانهائي'}
+              </span>
+            </div>
+            <button
+              onClick={onOpenPremium}
+              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-black transition-all"
+            >
+              إدارة الاشتراك وإلغاء التفعيل
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+              تحصل الباقة المجانية على <strong className="text-slate-700 dark:text-slate-300 font-extrabold">٢٠ عملية ذكاء اصطناعي</strong> شهرياً (قراءة فواتير، توجيه صوتي، استشارات التوفير). الترقية تمنحك استدعاءات مفتوحة ومزامنة فورية لكافة أفراد العائلة.
+            </p>
+
+            {/* Progress bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-[10px] font-black">
+                <span className="text-slate-500">الاستخدام الحالي للذكاء الاصطناعي:</span>
+                <span className="text-slate-800 dark:text-white font-mono">{(userProfile?.aiUsageCount || 0)} / ٢٠ عملية</span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    (userProfile?.aiUsageCount || 0) >= 18 
+                      ? 'bg-red-500' 
+                      : (userProfile?.aiUsageCount || 0) >= 12 
+                        ? 'bg-amber-500' 
+                        : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${Math.min(100, ((userProfile?.aiUsageCount || 0) / 20) * 100)}%` }}
+                ></div>
+              </div>
+              {userProfile?.limitResetDate && (
+                <p className="text-[9px] text-slate-400 font-bold">
+                  سيتم إعادة تصفير حد الاستخدام تلقائياً في {new Date(userProfile.limitResetDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })}
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={onOpenPremium}
+              className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 rounded-2xl text-center text-xs font-black transition-all shadow-md shadow-amber-500/10 hover:brightness-105 active:scale-98 flex items-center justify-center gap-1.5"
+            >
+              <Zap className="w-4 h-4 fill-slate-950" />
+              <span>ترقية العائلة إلى الباقة الممتازة بريميوم 🚀</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2. Monthly Family Budget Setting */}

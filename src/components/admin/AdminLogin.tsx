@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Lock, Mail, KeyRound, ShieldAlert, Sparkles, LogIn, ChevronLeft, HelpCircle } from 'lucide-react';
+import { api } from '../../services/api';
 
 interface AdminLoginProps {
   onLoginSuccess: (adminEmail: string) => void;
@@ -19,42 +20,49 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
   const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    if (email !== 'admin@bayti-ai.com' || password !== 'Admin@Bayti2026') {
-      setError('البريد الإلكتروني أو كلمة المرور غير صحيحة.');
-      return;
-    }
-
     setIsLoading(true);
-    setTimeout(() => {
+
+    try {
+      const res = await api.adminLogin({ email, password });
       setIsLoading(false);
-      setStep('2fa');
-    }, 800);
+      if (res.success) {
+        setStep('2fa');
+      } else {
+        setError(res.error || 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setError('حدث خطأ بالاتصال بالخادم الإداري.');
+    }
   };
 
-  const handle2faSubmit = (e: React.FormEvent) => {
+  const handle2faSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    if (twoFactorCode !== '123456') {
-      setError('رمز التحقق الثنائي (2FA) غير صحيح. استخدم الرمز التجريبي 123456.');
-      return;
-    }
-
     setIsLoading(true);
-    setTimeout(() => {
+
+    try {
+      const res = await api.adminVerify2fa({ email, code: twoFactorCode });
       setIsLoading(false);
-      // Save session in local storage
-      localStorage.setItem('bayti_admin_session', JSON.stringify({
-        email,
-        loggedInAt: new Date().toISOString(),
-        role: 'SuperAdmin'
-      }));
-      onLoginSuccess(email);
-    }, 800);
+      if (res.success) {
+        // Save session details in local storage for legacy layout synchronization
+        const session = {
+          email,
+          loggedInAt: new Date().toISOString(),
+          role: res.user?.role || 'SUPER_ADMIN'
+        };
+        localStorage.setItem('bayti_admin_session', JSON.stringify(session));
+        onLoginSuccess(email);
+      } else {
+        setError(res.error || 'رمز التحقق الثنائي غير صحيح.');
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setError('حدث خطأ أثناء معالجة رمز التحقق.');
+    }
   };
 
   const handleForgotPassword = (e: React.FormEvent) => {
