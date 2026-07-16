@@ -1,0 +1,6 @@
+{
+  "name": "Bayti AI",
+  "description": "بيت AI - المساعد المالي الذكي للعائلة لإدارة المصاريف وتحليل الفواتير بالذكاء الاصطناعي",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
