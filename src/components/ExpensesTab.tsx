@@ -38,6 +38,7 @@ export default function ExpensesTab({
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('All');
   const [activeMemberFilter, setActiveMemberFilter] = useState<string>('All');
   const [expandedExpenseId, setExpandedExpenseId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Manual creation states (Fallback)
   const [showManualForm, setShowManualForm] = useState(false);
@@ -345,24 +346,47 @@ export default function ExpensesTab({
                   </div>
                   
                   <div className="flex items-center gap-2">
-                    <div className="text-left">
-                      <p className="font-bold text-red-500 text-sm font-mono">- {formatCurrency(exp.amount)}</p>
-                      <p className="text-[9px] text-slate-400 text-left">{PAYMENT_METHODS[exp.paymentMethod] || exp.paymentMethod}</p>
-                    </div>
+                    {deletingId === exp.id ? (
+                      <div 
+                        className="flex items-center gap-1 bg-red-50 border border-red-100 rounded-xl p-1 shrink-0 animate-slide-left"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => {
+                            onDeleteExpense(exp.id);
+                            setDeletingId(null);
+                          }}
+                          className="bg-red-500 hover:bg-red-600 text-white text-[10px] font-black px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                        >
+                          تأكيد حذف
+                        </button>
+                        <button
+                          onClick={() => setDeletingId(null)}
+                          className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                        >
+                          تراجع
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-left">
+                          <p className="font-bold text-red-500 text-sm font-mono">- {formatCurrency(exp.amount)}</p>
+                          <p className="text-[9px] text-slate-400 text-left">{PAYMENT_METHODS[exp.paymentMethod] || exp.paymentMethod}</p>
+                        </div>
 
-                    {/* Delete button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm('هل أنت متأكد من حذف هذا المصروف؟')) {
-                          onDeleteExpense(exp.id);
-                        }
-                      }}
-                      className="p-1.5 text-slate-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
-                      title="حذف"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                        {/* Delete button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingId(exp.id);
+                          }}
+                          className="p-1.5 text-slate-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
+                          title="حذف"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
 
                     {hasItems && (
                       <div className="text-slate-400 shrink-0">

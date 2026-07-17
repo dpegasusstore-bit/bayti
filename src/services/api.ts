@@ -120,6 +120,14 @@ export const api = {
     return res.json();
   },
 
+  async exportAccount() {
+    const res = await fetch('/api/auth/export-account', {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+    return res.json();
+  },
+
   async logout() {
     try {
       await fetch('/api/auth/logout', {

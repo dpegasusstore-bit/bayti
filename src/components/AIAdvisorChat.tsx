@@ -247,9 +247,13 @@ export default function AIAdvisorChat({
     setIsLoading(true);
 
     try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           message: textToSend,
           history: messages.map(m => ({ role: m.role, text: m.text })),
@@ -311,9 +315,13 @@ export default function AIAdvisorChat({
     `;
 
     try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           message: reportPrompt,
           expenses,

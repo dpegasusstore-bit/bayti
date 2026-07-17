@@ -422,20 +422,20 @@ export default function HomeTab({
           <p className="text-xs text-[#1E40AF] text-center py-2 font-medium">لا توجد تحليلات كافية حالياً، أضف بعض المصاريف أولاً.</p>
         ) : (
           <div className="space-y-3">
-            {insights.slice(0, 2).map((insight) => {
+            {insights.slice(0, 5).map((insight) => {
               return (
                 <div 
                   key={insight.id} 
                   className={`p-3.5 rounded-2xl border transition-all flex gap-3 ${
-                    insight.type === 'warning' 
-                      ? 'bg-red-50/40 border-red-100 text-red-900' 
+                    insight.type === 'warning' || insight.type === 'alert'
+                      ? 'bg-red-50/40 border-red-100 text-red-900 dark:bg-red-950/25 dark:border-red-900' 
                       : insight.type === 'success' 
-                        ? 'bg-emerald-50/40 border-emerald-100 text-emerald-900' 
+                        ? 'bg-emerald-50/40 border-emerald-100 text-emerald-900 dark:bg-emerald-950/25 dark:border-emerald-900' 
                         : 'bg-white dark:bg-slate-800 border-blue-200 text-[#1E40AF] dark:text-blue-400'
                   }`}
                 >
                   <div className="mt-0.5 shrink-0">
-                    {insight.type === 'warning' ? (
+                    {insight.type === 'warning' || insight.type === 'alert' ? (
                       <AlertTriangle className="w-4 h-4 text-red-500" />
                     ) : insight.type === 'success' ? (
                       <CheckCircle className="w-4 h-4 text-emerald-500" />

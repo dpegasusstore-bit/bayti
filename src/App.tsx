@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AppHeader from './components/AppHeader';
 import TabBar, { TabId } from './components/TabBar';
 import HomeTab from './components/HomeTab';
@@ -92,6 +92,9 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
 
+  // Track the last successfully synchronized data to prevent redundant API calls
+  const lastSyncedRef = useRef<{ expenses: string; familyMembers: string }>({ expenses: '', familyMembers: '' });
+
   // 1. Session check and remote database pull on startup
   useEffect(() => {
     async function checkAuth() {
@@ -101,9 +104,30 @@ export default function App() {
           if (res.success) {
             setCurrentUser(res.user);
             setUserProfile(res.profile);
+            setIsPremium(res.profile?.subscription === 'Premium');
+            localStorage.setItem('bayti_premium', String(res.profile?.subscription === 'Premium'));
             setOnboardingCompleted(res.onboarding?.onboardingCompleted);
             if (res.profile?.fullName) {
               setCurrentMemberName(res.profile.fullName);
+            }
+            if (res.profile?.currency) {
+              setActiveCurrency(res.profile.currency);
+              localStorage.setItem('bayti_active_currency', res.profile.currency);
+            }
+            if (res.settings) {
+              setIsPasscodeEnabled(res.settings.isPasscodeEnabled);
+              setIsFaceIdEnabled(res.settings.isFaceIdEnabled);
+              setHideFinancialValues(res.settings.hideFinancialValues);
+              setHideNotificationsContent(res.settings.hideNotificationsContent);
+              
+              localStorage.setItem('bayti_passcode_enabled', String(res.settings.isPasscodeEnabled));
+              localStorage.setItem('bayti_faceid_enabled', String(res.settings.isFaceIdEnabled));
+              localStorage.setItem('bayti_hide_values', String(res.settings.hideFinancialValues));
+              localStorage.setItem('bayti_hide_notifications', String(res.settings.hideNotificationsContent));
+              
+              if (!res.settings.isPasscodeEnabled) {
+                setIsUnlocked(true);
+              }
             }
 
             // Pull active records from the persistent cloud database
@@ -111,9 +135,11 @@ export default function App() {
             if (dataRes.success) {
               if (dataRes.expenses && dataRes.expenses.length > 0) {
                 setExpenses(dataRes.expenses);
+                lastSyncedRef.current.expenses = JSON.stringify(dataRes.expenses);
               }
               if (dataRes.familyMembers && dataRes.familyMembers.length > 0) {
                 setFamilyMembers(dataRes.familyMembers);
+                lastSyncedRef.current.familyMembers = JSON.stringify(dataRes.familyMembers);
               }
               if (dataRes.reminders && dataRes.reminders.length > 0) {
                 setReminders(dataRes.reminders);
@@ -139,9 +165,20 @@ export default function App() {
   // 2. Automatic cloud-database synchronization when local state modifications occur
   useEffect(() => {
     if (userToken && authChecked && currentUser) {
+      const currentExpensesStr = JSON.stringify(expenses);
+      const currentMembersStr = JSON.stringify(familyMembers);
+
+      // Skip synchronization if local data is already identical to the last successfully synced data
+      if (
+        currentExpensesStr === lastSyncedRef.current.expenses &&
+        currentMembersStr === lastSyncedRef.current.familyMembers
+      ) {
+        return;
+      }
+
       const syncTimeout = setTimeout(async () => {
         try {
-          await api.syncData({
+          const syncRes = await api.syncData({
             expenses,
             familyMembers,
             reminders,
@@ -158,6 +195,12 @@ export default function App() {
               wantsGoals: true
             }
           });
+          if (syncRes.success) {
+            lastSyncedRef.current = {
+              expenses: currentExpensesStr,
+              familyMembers: currentMembersStr
+            };
+          }
         } catch (e) {
           console.error('Failed to auto-sync with server:', e);
         }
@@ -395,20 +438,57 @@ export default function App() {
   };
 
   // Delete Expense
-  const handleDeleteExpense = (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     const target = expenses.find((e) => e.id === id);
     if (!target) return;
 
     const updatedExpenses = expenses.filter((e) => e.id !== id);
-    saveExpenses(updatedExpenses);
-
     const updatedMembers = familyMembers.map((m) => {
       if (m.name === target.recordedBy) {
         return { ...m, spentThisMonth: Math.max(0, m.spentThisMonth - target.amount) };
       }
       return m;
     });
+
+    // 1. Immediately update local state & localStorage for instant, highly-responsive UI feedback
+    saveExpenses(updatedExpenses);
     saveMembers(updatedMembers);
+
+    // 2. Trigger an immediate, non-debounced database sync to ensure the deletion persists on the server
+    if (userToken && authChecked && currentUser) {
+      try {
+        const syncRes = await api.syncData({
+          expenses: updatedExpenses,
+          familyMembers: updatedMembers,
+          reminders,
+          notifications: smartNotifications,
+          onboarding: {
+            onboardingCompleted,
+            salary: monthlyBudget,
+            otherIncome: 0,
+            familyMembersCount: familyMembers.length || 1,
+            ownsCar: false,
+            paysInstallments: false,
+            participatesInGroup: false,
+            homeStatus: 'own',
+            wantsGoals: true
+          }
+        });
+
+        if (syncRes.success) {
+          // Pre-populate lastSyncedRef to ensure the debounced useEffect auto-sync doesn't fire redundantly
+          lastSyncedRef.current = {
+            expenses: JSON.stringify(updatedExpenses),
+            familyMembers: JSON.stringify(updatedMembers)
+          };
+          console.log('[App] Database deletion sync completed successfully.');
+        } else {
+          console.error('[App] Database deletion sync failed:', syncRes.error);
+        }
+      } catch (err) {
+        console.error('[App] Network error during immediate database sync on deletion:', err);
+      }
+    }
 
     // Refresh advice
     triggerBackgroundInsights(updatedExpenses, updatedMembers);
@@ -418,9 +498,13 @@ export default function App() {
   const triggerBackgroundInsights = async (currExpenses: Expense[], currMembers: FamilyMember[]) => {
     setLoadingInsights(true);
     try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
       const response = await fetch('/api/ai/generate-insights', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           expenses: currExpenses,
           familyMembers: currMembers,
@@ -591,7 +675,7 @@ export default function App() {
     setIsQuickActionOpen(true);
   };
 
-  const handleTogglePasscode = () => {
+  const handleTogglePasscode = async () => {
     const nextVal = !isPasscodeEnabled;
     setIsPasscodeEnabled(nextVal);
     localStorage.setItem('bayti_passcode_enabled', String(nextVal));
@@ -600,29 +684,64 @@ export default function App() {
     } else {
       setIsUnlocked(false);
     }
+    if (userToken) {
+      try {
+        await api.updateProfile({ isPasscodeEnabled: nextVal });
+      } catch (err) {
+        console.error('Failed to sync passcode setting:', err);
+      }
+    }
   };
 
-  const handleToggleFaceId = () => {
+  const handleToggleFaceId = async () => {
     const nextVal = !isFaceIdEnabled;
     setIsFaceIdEnabled(nextVal);
     localStorage.setItem('bayti_faceid_enabled', String(nextVal));
+    if (userToken) {
+      try {
+        await api.updateProfile({ isFaceIdEnabled: nextVal });
+      } catch (err) {
+        console.error('Failed to sync faceid setting:', err);
+      }
+    }
   };
 
-  const handleToggleHideValues = () => {
+  const handleToggleHideValues = async () => {
     const nextVal = !hideFinancialValues;
     setHideFinancialValues(nextVal);
     localStorage.setItem('bayti_hide_values', String(nextVal));
+    if (userToken) {
+      try {
+        await api.updateProfile({ hideFinancialValues: nextVal });
+      } catch (err) {
+        console.error('Failed to sync hideValues setting:', err);
+      }
+    }
   };
 
-  const handleToggleHideNotifications = () => {
+  const handleToggleHideNotifications = async () => {
     const nextVal = !hideNotificationsContent;
     setHideNotificationsContent(nextVal);
     localStorage.setItem('bayti_hide_notifications', String(nextVal));
+    if (userToken) {
+      try {
+        await api.updateProfile({ hideNotificationsContent: nextVal });
+      } catch (err) {
+        console.error('Failed to sync hideNotifications setting:', err);
+      }
+    }
   };
 
-  const handleCurrencyChange = (currency: string) => {
+  const handleCurrencyChange = async (currency: string) => {
     setActiveCurrency(currency);
     localStorage.setItem('bayti_active_currency', currency);
+    if (userToken) {
+      try {
+        await api.updateProfile({ currency });
+      } catch (err) {
+        console.error('Failed to sync currency:', err);
+      }
+    }
   };
 
   if (!isSplashFinished) {
@@ -632,8 +751,8 @@ export default function App() {
   if (isPasscodeEnabled && !isUnlocked) {
     return (
       <SecurityGate 
-        isFaceIdEnabled={isFaceIdEnabled} 
-        onUnlock={() => setIsUnlocked(true)} 
+         isFaceIdEnabled={isFaceIdEnabled} 
+         onUnlock={() => setIsUnlocked(true)} 
       />
     );
   }
@@ -641,13 +760,29 @@ export default function App() {
   if (!userToken) {
     return (
       <UserAuth 
-        onLoginSuccess={(token, user, profile, onboarding) => {
+        onLoginSuccess={(token, user, profile, onboarding, settings) => {
           setUserToken(token);
           setCurrentUser(user);
           setUserProfile(profile);
+          setIsPremium(profile?.subscription === 'Premium');
+          localStorage.setItem('bayti_premium', String(profile?.subscription === 'Premium'));
           setOnboardingCompleted(onboarding?.onboardingCompleted);
           if (profile?.fullName) {
             setCurrentMemberName(profile.fullName);
+          }
+          if (profile?.currency) {
+            setActiveCurrency(profile.currency);
+            localStorage.setItem('bayti_active_currency', profile.currency);
+          }
+          if (settings) {
+            setIsPasscodeEnabled(settings.isPasscodeEnabled);
+            setIsFaceIdEnabled(settings.isFaceIdEnabled);
+            setHideFinancialValues(settings.hideFinancialValues);
+            setHideNotificationsContent(settings.hideNotificationsContent);
+            localStorage.setItem('bayti_passcode_enabled', String(settings.isPasscodeEnabled));
+            localStorage.setItem('bayti_faceid_enabled', String(settings.isFaceIdEnabled));
+            localStorage.setItem('bayti_hide_values', String(settings.hideFinancialValues));
+            localStorage.setItem('bayti_hide_notifications', String(settings.hideNotificationsContent));
           }
         }} 
       />

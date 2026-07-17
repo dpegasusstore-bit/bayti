@@ -8,7 +8,7 @@ import {
 import { api } from '../services/api';
 
 interface UserAuthProps {
-  onLoginSuccess: (token: string, user: any, profile: any, onboarding: any) => void;
+  onLoginSuccess: (token: string, user: any, profile: any, onboarding: any, settings?: any) => void;
 }
 
 const AVATARS = ['👨🏻‍💼', '👩🏻‍⚕️', '👨🏻‍💻', '👧🏻', '🧔', '👩', '👴', '👵', '🦁', '🦉', '🦊', '🎨'];
@@ -78,7 +78,7 @@ export default function UserAuth({ onLoginSuccess }: UserAuthProps) {
       if (res.success) {
         setSuccess('تم تسجيل الدخول عبر Google بنجاح!');
         setTimeout(() => {
-          onLoginSuccess(res.token, res.user, res.profile, res.onboarding);
+          onLoginSuccess(res.token, res.user, res.profile, res.onboarding, res.settings);
         }, 1000);
       } else {
         setError(res.error || 'فشل تسجيل الدخول عبر Google.');
@@ -106,7 +106,7 @@ export default function UserAuth({ onLoginSuccess }: UserAuthProps) {
       if (res.success) {
         setSuccess('تم تسجيل الدخول بنجاح! جاري تحميل ميزانيتك...');
         setTimeout(() => {
-          onLoginSuccess(res.token, res.user, res.profile, res.onboarding);
+          onLoginSuccess(res.token, res.user, res.profile, res.onboarding, res.settings);
         }, 1200);
       } else {
         if (res.notVerified) {

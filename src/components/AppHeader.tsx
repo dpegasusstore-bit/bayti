@@ -34,8 +34,12 @@ export default function AppHeader({
       {/* User profile & Name */}
       <div className="flex items-center gap-3">
         <div className="relative">
-          <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-slate-800 flex items-center justify-center text-lg font-bold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-slate-700">
-            {userAvatar}
+          <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-slate-800 flex items-center justify-center text-lg font-bold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-slate-700 overflow-hidden shadow-inner">
+            {userAvatar && (userAvatar.startsWith('http') || userAvatar.startsWith('/api/') || userAvatar.startsWith('data:')) ? (
+              <img src={userAvatar} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              userAvatar
+            )}
           </div>
           {isPremium && (
             <span className="absolute -top-1 -right-1 bg-amber-400 text-white p-0.5 rounded-full border-2 border-white dark:border-slate-900 shadow-sm">

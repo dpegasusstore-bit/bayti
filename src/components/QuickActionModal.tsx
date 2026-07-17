@@ -72,9 +72,13 @@ export default function QuickActionModal({
       reader.onloadend = async () => {
         const base64Audio = reader.result as string;
         
+        const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
         const response = await fetch('/api/ai/parse-voice', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             audio: base64Audio,
             mimeType: 'audio/webm',
@@ -188,9 +192,13 @@ export default function QuickActionModal({
     setSuccessExpense(null);
 
     try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
       const response = await fetch('/api/ai/parse-text', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ 
           text: textToParse, 
           recordedBy: currentMember 
@@ -226,9 +234,13 @@ export default function QuickActionModal({
     try {
       // We pass the simulated phrase as text to our text-parser as a fallback mock sound,
       // but styled beautifully to demonstrate the full functional capability!
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
       const response = await fetch('/api/ai/parse-text', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ 
           text: phrase, 
           recordedBy: currentMember 
@@ -272,9 +284,13 @@ export default function QuickActionModal({
     setLoadingText('جارٍ قراءة الفاتورة وإجراء المسح الضوئي (OCR) للمشتريات والمجموع...');
     
     try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
       const response = await fetch('/api/ai/parse-receipt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           image: base64Image,
           recordedBy: currentMember

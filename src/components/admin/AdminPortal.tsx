@@ -11,6 +11,7 @@ import PremiumManagementView from './views/PremiumManagementView';
 import AnalyticsView from './views/AnalyticsView';
 import NotificationsView from './views/NotificationsView';
 import SettingsView from './views/SettingsView';
+import BackupStatsView from './views/BackupStatsView';
 
 import { 
   INITIAL_ADMIN_USERS, INITIAL_SUBSCRIPTIONS, INITIAL_FEEDBACK, 
@@ -340,6 +341,10 @@ export default function AdminPortal() {
             onAddAuditLog={addAuditLog} 
           />
         );
+      case '/admin/backups':
+        return (
+          <BackupStatsView />
+        );
       default:
         // Default to dashboard view for safety
         return (
@@ -359,6 +364,7 @@ export default function AdminPortal() {
     { name: 'إدارة المستخدمين والعائلات', path: '/admin/users', icon: Users },
     { name: 'باقات واشتراكات بريميوم', path: '/admin/subscriptions', icon: Award },
     { name: 'التحليلات المالية المتقدمة', path: '/admin/analytics', icon: BarChart3 },
+    { name: 'إحصائيات النسخ الاحتياطي السحابي', path: '/admin/backups', icon: ShieldCheck },
     { name: 'الدعم الفني وتذاكر العمليات', path: '/admin/notifications', icon: Bell },
     { name: 'إعدادات النظام والرقابة (RBAC)', path: '/admin/settings', icon: Settings },
   ];

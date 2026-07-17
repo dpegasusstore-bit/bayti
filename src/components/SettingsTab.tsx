@@ -87,12 +87,154 @@ export default function SettingsTab({
   onOpenExport,
   onOpenPremium
 }: SettingsTabProps) {
-  // Local UI state for backup and Help Center
-  const [backupRestoreInput, setBackupRestoreInput] = useState('');
-  const [showBackupTextarea, setShowBackupTextarea] = useState(false);
-  const [restoreSuccess, setRestoreSuccess] = useState(false);
-  const [restoreError, setRestoreError] = useState('');
+  // Local UI state for Cloud Backups and Help Center
+  const [backupsList, setBackupsList] = useState<any[]>([]);
+  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [selectedBackupForRestore, setSelectedBackupForRestore] = useState<any | null>(null);
+  const [restoreMode, setRestoreMode] = useState<'replace' | 'merge'>('merge');
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  // Fetch Backups from database
+  const fetchBackups = async () => {
+    try {
+      setIsLoadingBackups(true);
+      const response = await fetch('/api/backup/list');
+      const data = await response.json();
+      if (data.success) {
+        setBackupsList(data.backups);
+      }
+    } catch (err) {
+      console.error('Error fetching backups list:', err);
+    } finally {
+      setIsLoadingBackups(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBackups();
+  }, []);
+
+  // Create new Backup
+  const handleCreateNewBackup = async () => {
+    try {
+      setIsCreatingBackup(true);
+      const res = await fetch('/api/backup/create', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await fetchBackups();
+        if (window.navigator?.vibrate) window.navigator.vibrate(100);
+      } else {
+        alert(data.error || 'فشل إنشاء النسخة الاحتياطية.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ غير متوقع أثناء الاتصال بالخادم.');
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  };
+
+  // Delete Backup
+  const handleDeleteBackup = async (id: string) => {
+    if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذه النسخة الاحتياطية بشكل نهائي؟ لا يمكن التراجع عن هذه العملية.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/backup/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        await fetchBackups();
+      } else {
+        alert(data.error || 'فشل حذف النسخة الاحتياطية.');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Download Backup File
+  const handleDownloadBackupFile = (id: string) => {
+    window.open(`/api/backup/download/${id}`, '_blank');
+  };
+
+  // Restore Backup
+  const handleRestoreBackupSubmit = async () => {
+    if (!selectedBackupForRestore) return;
+    try {
+      setIsRestoring(true);
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          backupId: selectedBackupForRestore.id,
+          mode: restoreMode,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('تمت استعادة البيانات بنجاح! سيتم تحديث الصفحة لتطبيق التغييرات.');
+        setSelectedBackupForRestore(null);
+        window.location.reload();
+      } else {
+        alert(data.error || 'فشل استعادة النسخة الاحتياطية.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ غير متوقع أثناء الاتصال بالخادم.');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  // Upload and Restore Backup File
+  const handleFileChangeAndUploadRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadError('');
+    setUploadSuccess(false);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      if (!text) {
+        setUploadError('الملف فارغ أو غير صالح.');
+        return;
+      }
+
+      const mode = window.confirm('هل تريد استبدال البيانات الحالية بالكامل؟ انقر "موافق" للاستبدال الكامل، أو "إلغاء" للدمج دون تكرار.') ? 'replace' : 'merge';
+
+      try {
+        setIsRestoring(true);
+        const res = await fetch('/api/backup/upload-restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            encryptedString: text.trim(),
+            mode,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setUploadSuccess(true);
+          alert('تم استيراد واستعادة ملف النسخة الاحتياطية بنجاح! سيتم إعادة تحميل الصفحة الآن.');
+          window.location.reload();
+        } else {
+          setUploadError(data.error || 'فشل استيراد الملف.');
+        }
+      } catch (err) {
+        console.error(err);
+        setUploadError('حدث خطأ أثناء رفع ومعالجة الملف.');
+      } finally {
+        setIsRestoring(false);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   // Profile management & Sessions
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -104,6 +246,27 @@ export default function SettingsTab({
   const [profileError, setProfileError] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
   const [loginHistory, setLoginHistory] = useState<any[]>([]);
+
+  const [languageInput, setLanguageInput] = useState(userProfile?.language || 'ar');
+  const [countryInput, setCountryInput] = useState(userProfile?.country || 'مصر');
+  const [currencyInput, setCurrencyInput] = useState(activeCurrency || 'EGP');
+  const [avatarInput, setAvatarInput] = useState(userProfile?.profilePicture || '👨🏻‍💼');
+
+  useEffect(() => {
+    if (userProfile) {
+      if (userProfile.fullName) setFullNameInput(userProfile.fullName);
+      if (userProfile.phone) setPhoneInput(userProfile.phone);
+      if (userProfile.language) setLanguageInput(userProfile.language);
+      if (userProfile.country) setCountryInput(userProfile.country);
+      if (userProfile.profilePicture) setAvatarInput(userProfile.profilePicture);
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (activeCurrency) {
+      setCurrencyInput(activeCurrency);
+    }
+  }, [activeCurrency]);
 
   useEffect(() => {
     async function fetchSessions() {
@@ -120,6 +283,83 @@ export default function SettingsTab({
     fetchSessions();
   }, []);
 
+  const handleCustomProfilePicUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setProfileError('يرجى اختيار ملف صورة صالح.');
+      return;
+    }
+
+    setSavingProfile(true);
+    setProfileError('');
+    setProfileSuccess('');
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      try {
+        const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
+        const response = await fetch('/api/auth/upload-profile-picture', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ image: base64String })
+        });
+        const data = await response.json();
+        if (data.success) {
+          setAvatarInput(data.profilePicture);
+          setProfileSuccess('تم رفع صورتك الشخصية المخصصة وتحديثها بنجاح!');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        } else {
+          setProfileError(data.error || 'فشل في رفع الصورة.');
+        }
+      } catch (err) {
+        console.error('Profile pic upload error:', err);
+        setProfileError('حدث خطأ أثناء الاتصال بالخادم لرفع الصورة.');
+      } finally {
+        setSavingProfile(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDeleteCustomProfilePic = async () => {
+    setSavingProfile(true);
+    setProfileError('');
+    setProfileSuccess('');
+    try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
+      const response = await fetch('/api/auth/delete-profile-picture', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      if (data.success) {
+        setAvatarInput(data.profilePicture);
+        setProfileSuccess('تم حذف صورتك الشخصية المخصصة والعودة للصورة الافتراضية بنجاح!');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        setProfileError(data.error || 'فشل في حذف الصورة الشخصية.');
+      }
+    } catch (err) {
+      console.error('Profile pic delete error:', err);
+      setProfileError('حدث خطأ أثناء الاتصال بالخادم لحذف الصورة.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const handleUpdateProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileError('');
@@ -133,7 +373,11 @@ export default function SettingsTab({
       const res = await api.updateProfile({
         fullName: fullNameInput,
         phone: phoneInput,
-        password: passInput || undefined
+        password: passInput || undefined,
+        language: languageInput,
+        country: countryInput,
+        currency: currencyInput,
+        profilePicture: avatarInput
       });
       if (res.success) {
         setProfileSuccess('تم تحديث بيانات ملفك الشخصي وكلمة المرور بنجاح!');
@@ -186,67 +430,7 @@ export default function SettingsTab({
     }
   ];
 
-  // Manual Backup Generator
-  const handleExportBackup = () => {
-    try {
-      const backupObj = {
-        expenses: JSON.parse(localStorage.getItem('bayti_expenses') || '[]'),
-        members: JSON.parse(localStorage.getItem('bayti_members') || '[]'),
-        reminders: JSON.parse(localStorage.getItem('bayti_reminders') || '[]'),
-        smart_notifications: JSON.parse(localStorage.getItem('bayti_smart_notifications') || '[]'),
-        budget: Number(localStorage.getItem('bayti_budget') || '15000'),
-        premium: localStorage.getItem('bayti_premium') === 'true',
-        onboarding_completed: localStorage.getItem('bayti_onboarding_completed') === 'true',
-        onboarding_data: JSON.parse(localStorage.getItem('bayti_onboarding_data') || '{}')
-      };
 
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObj, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `نسخة_احتياطية_بيت_AI_${new Date().toISOString().split('T')[0]}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-    } catch (err) {
-      console.error('Failed to export backup:', err);
-    }
-  };
-
-  // Manual Backup Restorer
-  const handleImportBackup = () => {
-    try {
-      setRestoreError('');
-      setRestoreSuccess(false);
-      const parsed = JSON.parse(backupRestoreInput);
-      
-      if (!parsed.expenses || !parsed.members) {
-        setRestoreError('الملف غير متوافق! تأكد من نسخ ملف النسخة الاحتياطية الأصلي لبيت AI.');
-        return;
-      }
-
-      localStorage.setItem('bayti_expenses', JSON.stringify(parsed.expenses));
-      localStorage.setItem('bayti_members', JSON.stringify(parsed.members));
-      if (parsed.reminders) localStorage.setItem('bayti_reminders', JSON.stringify(parsed.reminders));
-      if (parsed.smart_notifications) localStorage.setItem('bayti_smart_notifications', JSON.stringify(parsed.smart_notifications));
-      if (parsed.budget) localStorage.setItem('bayti_budget', String(parsed.budget));
-      if (parsed.premium !== undefined) localStorage.setItem('bayti_premium', String(parsed.premium));
-      if (parsed.onboarding_completed !== undefined) localStorage.setItem('bayti_onboarding_completed', String(parsed.onboarding_completed));
-      if (parsed.onboarding_data) localStorage.setItem('bayti_onboarding_data', JSON.stringify(parsed.onboarding_data));
-
-      setRestoreSuccess(true);
-      setBackupRestoreInput('');
-      
-      if (window.navigator?.vibrate) {
-        window.navigator.vibrate([100, 50, 100]);
-      }
-
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-    } catch (e) {
-      setRestoreError('حدث خطأ في قراءة ملف التنسيق! يرجى التحقق من صحة النص المكتوب.');
-    }
-  };
 
   return (
     <div className="space-y-6 pb-24" style={{ direction: 'rtl' }}>
@@ -262,8 +446,12 @@ export default function SettingsTab({
         {/* Top Header Row */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl font-bold border border-blue-100 dark:border-slate-700">
-              {userProfile?.profilePicture || '👨🏻‍💼'}
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl font-bold border border-blue-100 dark:border-slate-700 overflow-hidden shadow-inner">
+              {userProfile?.profilePicture && (userProfile.profilePicture.startsWith('http') || userProfile.profilePicture.startsWith('/api/') || userProfile.profilePicture.startsWith('data:')) ? (
+                <img src={userProfile.profilePicture} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                userProfile?.profilePicture || '👨🏻‍💼'
+              )}
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-800 dark:text-white">{userProfile?.fullName || 'مستخدم بيت AI'}</h3>
@@ -317,7 +505,7 @@ export default function SettingsTab({
         {/* Profile Editing Form */}
         {isEditingProfile && (
           <form onSubmit={handleUpdateProfileSubmit} className="space-y-4 border-t border-slate-100 dark:border-slate-800/80 pt-4 animate-fade-in">
-            <h4 className="text-xs font-black text-slate-800 dark:text-slate-200">تحديث البيانات الشخصية</h4>
+            <h4 className="text-xs font-black text-slate-800 dark:text-slate-200">تحديث البيانات الشخصية والخيارات</h4>
             
             {profileError && (
               <p className="text-rose-600 text-[10px] font-bold">{profileError}</p>
@@ -325,6 +513,71 @@ export default function SettingsTab({
             {profileSuccess && (
               <p className="text-emerald-600 text-[10px] font-bold">{profileSuccess}</p>
             )}
+
+            {/* Avatar Selector */}
+            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-100 dark:border-slate-800/60">
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">اختر صورتك التعبيرية أو ارفع صورة مخصصة</label>
+              
+              {avatarInput && (avatarInput.startsWith('http') || avatarInput.startsWith('/api/') || avatarInput.startsWith('data:')) && (
+                <div className="flex items-center gap-3 mb-4 p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <div className="w-14 h-14 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden flex items-center justify-center bg-slate-50 dark:bg-slate-800">
+                    <img src={avatarInput} alt="Custom Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black text-slate-800 dark:text-white block">صورة مخصصة مرفوعة</span>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold block mt-0.5">مخزنة ومحسنة سحابياً</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {['👨🏻‍💼', '👩🏻‍⚕️', '👨🏼‍💻', '👩🏻‍🏫', '👨🏽‍🎨', '👩🏼‍🔬', '🦁', '🚀', '🦉', '🥑'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setAvatarInput(emoji)}
+                    className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center border transition-all ${
+                      avatarInput === emoji
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600 scale-105 shadow-sm font-black'
+                        : 'border-slate-100 dark:border-slate-800 bg-slate-100/50 dark:bg-slate-900 hover:bg-slate-100 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom Image Upload Buttons */}
+              <div className="mt-3 pt-3 border-t border-dashed border-slate-200 dark:border-slate-800/60 flex flex-col gap-2">
+                <span className="text-[9px] font-black text-slate-400 uppercase">أو ارفع صورة مخصصة من جهازك (رفع سحابي محسّن)</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    id="profile-pic-upload"
+                    className="hidden"
+                    onChange={handleCustomProfilePicUpload}
+                  />
+                  <label
+                    htmlFor="profile-pic-upload"
+                    className="cursor-pointer bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-900/60 text-[10px] flex items-center gap-1.5 transition-all"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>رفع صورة مخصصة</span>
+                  </label>
+                  {avatarInput && (avatarInput.startsWith('http') || avatarInput.startsWith('/api/') || avatarInput.startsWith('data:')) && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteCustomProfilePic}
+                      className="bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 font-bold px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900/60 text-[10px] flex items-center gap-1.5 transition-all"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف الصورة والعودة للافتراضي</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -348,13 +601,63 @@ export default function SettingsTab({
               </div>
             </div>
 
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">اللغة المفضلة</label>
+                <select
+                  value={languageInput}
+                  onChange={(e) => setLanguageInput(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2 px-2 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="ar">العربية (Ar)</option>
+                  <option value="en">English (En)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">الدولة وموقع الإقامة</label>
+                <select
+                  value={countryInput}
+                  onChange={(e) => setCountryInput(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2 px-2 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="مصر">مصر 🇪🇬</option>
+                  <option value="المملكة العربية السعودية">السعودية 🇸🇦</option>
+                  <option value="الإمارات">الإمارات 🇦🇪</option>
+                  <option value="الكويت">الكويت 🇰🇼</option>
+                  <option value="عمان">عمان 🇴🇲</option>
+                  <option value="قطر">قطر 🇶🇦</option>
+                  <option value="الأردن">الأردن 🇯🇴</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">العملة الافتراضية</label>
+                <select
+                  value={currencyInput}
+                  onChange={(e) => {
+                    setCurrencyInput(e.target.value);
+                    onChangeCurrency(e.target.value);
+                  }}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2 px-2 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="EGP">جنيه مصري (EGP)</option>
+                  <option value="SAR">ريال سعودي (SAR)</option>
+                  <option value="AED">درهم إماراتي (AED)</option>
+                  <option value="USD">دولار أمريكي (USD)</option>
+                  <option value="EUR">يورو أوروبي (EUR)</option>
+                  <option value="KWD">دينار كويتي (KWD)</option>
+                </select>
+              </div>
+            </div>
+
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">تحديث كلمة المرور (اتركه فارغاً للاحتفاظ بالحالية)</label>
               <input
                 type="password"
                 value={passInput}
                 onChange={(e) => setPassInput(e.target.value)}
-                placeholder="أدخل كلمة مرور جديدة..."
+                placeholder="أدخل كلمة مرور جديدة للتحديث والتشديد الأمني..."
                 className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
@@ -362,9 +665,9 @@ export default function SettingsTab({
             <button
               type="submit"
               disabled={savingProfile}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
             >
-              {savingProfile ? 'جاري الحفظ...' : 'حفظ التغييرات ومزامنة الحساب'}
+              {savingProfile ? 'جاري تشفير وحفظ الإعدادات...' : 'تحديث ملفي الشخصي في السحابة الأمنية'}
             </button>
           </form>
         )}
@@ -386,7 +689,7 @@ export default function SettingsTab({
             )}
           </div>
           
-          <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
             {sessions.map((sess) => (
               <div key={sess.id} className="bg-slate-50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-slate-50 dark:border-slate-800 flex justify-between items-center text-[10px]">
                 <div className="space-y-0.5">
@@ -407,6 +710,62 @@ export default function SettingsTab({
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Login History Panel */}
+        <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 space-y-3">
+          <h4 className="text-xs font-black text-slate-800 dark:text-white flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>سجل عمليات تسجيل الدخول السابقة ({loginHistory.length})</span>
+          </h4>
+          <div className="space-y-2 max-h-[120px] overflow-y-auto pr-1">
+            {loginHistory.map((hist) => (
+              <div key={hist.id} className="bg-slate-50/50 dark:bg-slate-800/20 p-2 rounded-xl border border-slate-50/50 dark:border-slate-800/50 flex justify-between items-center text-[9px]">
+                <div className="space-y-0.5 text-slate-500">
+                  <span className="font-bold text-slate-600 dark:text-slate-400 block">{hist.device} ({hist.platform})</span>
+                  <span className="font-mono block">IP: {hist.ip} • {hist.browser}</span>
+                </div>
+                <div className="text-right text-slate-400">
+                  <span className="block font-bold">{hist.status === 'SUCCESS' ? '🟢 دخول ناجح' : '🔴 محاولة فشلت'}</span>
+                  <span className="font-mono text-[8px] block mt-0.5">{new Date(hist.createdAt).toLocaleString('ar-EG')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Export Account Data Section */}
+        <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 flex justify-between items-center">
+          <div>
+            <h4 className="text-xs font-black text-blue-600 dark:text-blue-400">تصدير بيانات الحساب السحابية</h4>
+            <p className="text-[9px] text-slate-400 mt-0.5">قم بتنزيل كافة معاملاتك، عائلتك، إعداداتك، وملفك الشخصي بنسخة JSON موحدة.</p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const res = await api.exportAccount();
+                if (res.success) {
+                  const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.setAttribute('download', `bayti_account_export_${new Date().toISOString().split('T')[0]}.json`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                } else {
+                  alert('فشل تصدير البيانات: ' + (res.error || 'خطأ مجهول'));
+                }
+              } catch (err) {
+                alert('حدث خطأ أثناء محاولة تصدير البيانات السحابية.');
+              }
+            }}
+            className="text-xs font-black text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-500/20 px-3.5 py-2 rounded-xl transition-all flex items-center gap-1"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>تصدير نسخة JSON شاملة</span>
+          </button>
         </div>
 
         {/* Delete Account Danger Button */}
@@ -618,7 +977,7 @@ export default function SettingsTab({
           <div className="flex justify-between items-center text-xs">
             <div>
               <h4 className="font-bold text-slate-700 dark:text-slate-200">تشفير تفاصيل الإشعارات (Mask Notifications)</h4>
-              <p className="text-[10px] text-slate-400 mt-0.5">عرض تنبيهات عامة دون كتابة المبالغ أو البقالة في شريط التنبيهات.</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">عرض تنبيهات عامة دون كتابة المبالغ في شريط التنبيهات.</p>
             </div>
             <button
               onClick={onToggleHideNotifications}
@@ -695,60 +1054,206 @@ export default function SettingsTab({
       <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-sm space-y-4">
         <div className="flex justify-between items-center text-slate-800 dark:text-white">
           <div className="flex items-center gap-2">
-            <Download className="w-4 h-4 text-blue-600" />
-            <h3 className="text-sm font-bold">النسخ الاحتياطي واستعادة البيانات</h3>
+            <ShieldCheck className="w-5 h-5 text-blue-600" />
+            <h3 className="text-sm font-bold">مركز النسخ الاحتياطي السحابي المشفر</h3>
           </div>
-          <span className="text-[9px] bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md font-bold uppercase">Encrypted</span>
+          <span className="text-[10px] bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider">AES-256</span>
         </div>
-        <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">احتفظ بملفات حساباتك بأمان تام أو انقلها إلى هاتف آخر في أي وقت.</p>
         
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={handleExportBackup}
-            className="py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl border border-slate-100 dark:border-slate-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-          >
-            <Download className="w-4 h-4 text-blue-500" />
-            <span>تنزيل نسخة احتياطية</span>
-          </button>
-          
-          <button
-            onClick={() => setShowBackupTextarea(!showBackupTextarea)}
-            className="py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl border border-slate-100 dark:border-slate-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-          >
-            <Upload className="w-4 h-4 text-emerald-500" />
-            <span>استرجاع البيانات</span>
-          </button>
-        </div>
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+          نظام نسخ احتياطي آمن وسحابي بالكامل لحماية ملفات عائلتك وأفرادها ومصروفاتها وأهدافها المالية. يتم تشفير الملفات على خادم بيت AI لتأمين السرية والخصوصية.
+        </p>
 
-        {showBackupTextarea && (
-          <div className="space-y-2 border-t border-slate-100 dark:border-slate-800 pt-3 flex flex-col">
-            <label className="text-[10px] font-black text-slate-400 uppercase">الصق محتوى النسخة الاحتياطية (JSON string):</label>
-            <textarea
-              value={backupRestoreInput}
-              onChange={(e) => setBackupRestoreInput(e.target.value)}
-              placeholder='الصق نص الـ JSON الكامل هنا...'
-              rows={4}
-              className="w-full text-xs font-mono p-3 border border-slate-100 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-left"
-              style={{ direction: 'ltr' }}
-            />
-            <button
-              onClick={handleImportBackup}
-              className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1"
-            >
-              <Check className="w-4 h-4" />
-              <span>تأكيد استرجاع وحفظ البيانات ومزامنة الحساب</span>
-            </button>
-            {restoreSuccess && (
-              <p className="text-emerald-600 text-[10px] font-bold text-center">تم استرجاع الحساب ومزامنة البيانات بنجاح! سيتم إعادة تحميل الصفحة الآن... 🔄</p>
-            )}
-            {restoreError && (
-              <p className="text-red-500 text-[10px] font-bold text-center flex items-center justify-center gap-1">
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>{restoreError}</span>
-              </p>
-            )}
+        {/* Premium feature highlight */}
+        {isPremium ? (
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 rounded-2xl flex items-center gap-2.5">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></div>
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-bold leading-relaxed">
+              اشتراك بريميوم نشط: جاري النسخ الاحتياطي التلقائي لحسابك (يومياً، أسبوعياً، شهرياً) بشكل آمن ومنتظم.
+            </p>
+          </div>
+        ) : (
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-2xl flex items-center gap-2.5">
+            <Zap className="w-4 h-4 text-amber-500 shrink-0" />
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium leading-relaxed">
+              النسخ الاحتياطي التلقائي المنتظم حصري لمشتركي <span className="font-bold cursor-pointer underline" onClick={onOpenPremium}>باقة بريميوم Premium</span>. يمكنك إجراء النسخ اليدوي وتصدير ملفاتك مجاناً في أي وقت.
+            </p>
           </div>
         )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <button
+            onClick={handleCreateNewBackup}
+            disabled={isCreatingBackup}
+            className="py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-blue-200 dark:shadow-none"
+          >
+            {isCreatingBackup ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>جاري إنشاء النسخة...</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-4 h-4" />
+                <span>إنشاء نسخة احتياطية سحابية فورية</span>
+              </>
+            )}
+          </button>
+          
+          <label className="py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center">
+            <Upload className="w-4 h-4 text-emerald-500" />
+            <span>رفع واستعادة ملف (.bayti)</span>
+            <input 
+              type="file" 
+              accept=".bayti" 
+              onChange={handleFileChangeAndUploadRestore} 
+              className="hidden" 
+            />
+          </label>
+        </div>
+
+        {uploadError && (
+          <p className="text-red-500 text-[11px] font-bold text-center bg-red-50 dark:bg-red-950/20 p-2 rounded-xl">{uploadError}</p>
+        )}
+        {uploadSuccess && (
+          <p className="text-emerald-600 text-[11px] font-bold text-center bg-emerald-50 dark:bg-emerald-950/20 p-2 rounded-xl">تم استيراد واستعادة ملف النسخة بنجاح!</p>
+        )}
+
+        {/* Selected Backup Restore warning and controls */}
+        {selectedBackupForRestore && (
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-amber-500" />
+              <span>تحذير استعادة البيانات</span>
+            </h4>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              أنت على وشك استعادة النسخة الاحتياطية المؤرخة في: <span className="font-bold text-slate-700 dark:text-slate-200">{new Date(selectedBackupForRestore.createdAt).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span> ({selectedBackupForRestore.type === 'manual' ? 'يدوية' : 'تلقائية'}). يرجى اختيار طريقة الاستعادة لتأكيد رغبتك:
+            </p>
+
+            <div className="space-y-2 pt-1">
+              <label className="flex items-start gap-2.5 p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800 cursor-pointer">
+                <input 
+                  type="radio" 
+                  name="restore_mode" 
+                  checked={restoreMode === 'merge'} 
+                  onChange={() => setRestoreMode('merge')} 
+                  className="mt-0.5 text-blue-600 focus:ring-blue-500" 
+                />
+                <div className="text-right">
+                  <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">دمج البيانات الذكي (موصى به)</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">يقوم بإضافة السجلات الجديدة فقط ويمنع تكرار أي سجلات موجودة مسبقاً.</p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800 cursor-pointer">
+                <input 
+                  type="radio" 
+                  name="restore_mode" 
+                  checked={restoreMode === 'replace'} 
+                  onChange={() => setRestoreMode('replace')} 
+                  className="mt-0.5 text-red-600 focus:ring-red-500" 
+                />
+                <div className="text-right">
+                  <p className="text-[11px] font-bold text-red-600 dark:text-red-400">استبدال كامل (حذف البيانات الحالية)</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">يقوم بمسح كامل البيانات الحالية على الحساب واستبدالها بنسخة الملف بالكامل.</p>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => setSelectedBackupForRestore(null)}
+                className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-[11px] font-bold transition-all"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={handleRestoreBackupSubmit}
+                disabled={isRestoring}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 shadow-sm"
+              >
+                {isRestoring ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>جاري الاستعادة...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>تأكيد واستعادة الآن</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Backups History list */}
+        <div className="space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
+          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+            <span>سجل النسخ الاحتياطية السحابية ({backupsList.length})</span>
+            {isLoadingBackups && <RefreshCw className="w-3 h-3 text-blue-500 animate-spin" />}
+          </h4>
+
+          {isLoadingBackups && backupsList.length === 0 ? (
+            <div className="text-center py-6">
+              <RefreshCw className="w-5 h-5 text-slate-400 animate-spin mx-auto mb-1" />
+              <p className="text-[11px] text-slate-400">جاري تحميل قائمة النسخ...</p>
+            </div>
+          ) : backupsList.length === 0 ? (
+            <div className="text-center py-6 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+              <p className="text-[11px] text-slate-400">لا توجد نسخ احتياطية مسجلة حالياً.</p>
+              <p className="text-[9px] text-slate-400 mt-0.5">انقر على زر الإنشاء بالأعلى لحفظ نسخة سحابية أولى لحسابك.</p>
+            </div>
+          ) : (
+            <div className="max-h-64 overflow-y-auto space-y-2 pr-0.5">
+              {backupsList.map((b) => (
+                <div key={b.id} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2 hover:bg-slate-100/50 dark:hover:bg-slate-850/50 transition-colors">
+                  <div className="text-right">
+                    <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                      {new Date(b.createdAt).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[9px] text-slate-400 font-medium">{(b.size / 1024).toFixed(1)} KB</span>
+                      <span className="text-[9px] text-slate-300 dark:text-slate-700">•</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                        b.type === 'manual' 
+                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-500' 
+                          : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {b.type === 'manual' ? 'يدوية' : b.type === 'auto_daily' ? 'يومية تلقائية' : b.type === 'auto_weekly' ? 'أسبوعية تلقائية' : 'شهرية تلقائية'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setSelectedBackupForRestore(b)}
+                      title="استعادة البيانات"
+                      className="p-1.5 hover:bg-blue-50 dark:hover:bg-slate-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDownloadBackupFile(b.id)}
+                      title="تنزيل الملف"
+                      className="p-1.5 hover:bg-emerald-50 dark:hover:bg-slate-800 text-emerald-600 dark:text-emerald-400 rounded-lg transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteBackup(b.id)}
+                      title="حذف النسخة"
+                      className="p-1.5 hover:bg-red-50 dark:hover:bg-slate-800 text-red-500 dark:text-red-400 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 8. Help & Support Center / Collapsible Accordions */}
