@@ -1320,11 +1320,32 @@ export function registerAuthRoutes(app: express.Express) {
         return res.status(400).json({ success: false, error: 'يرجى إدخال البريد الإلكتروني الإداري ورمز المرور.' });
       }
 
-      const adminEmail = process.env.ADMIN_EMAIL || 'admin@bayti-ai.com';
-      const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@Bayti2026';
+      const normalizedEmail = email.toLowerCase().trim();
+      const user = await prisma.user.findFirst({
+        where: {
+          email: normalizedEmail,
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] }
+        }
+      });
 
-      if (email.toLowerCase().trim() !== adminEmail.toLowerCase().trim() || password !== adminPassword) {
+      if (!user) {
         return res.status(401).json({ success: false, error: 'صلاحيات الإدارة غير صحيحة أو الحساب غير معتمد.' });
+      }
+
+      let isPasswordCorrect = false;
+      if (user.passwordHash) {
+        isPasswordCorrect = verifyPassword(password, user.passwordHash);
+      } else {
+        // Fallback for default seed admin if they have no passwordHash stored in DB
+        const fallbackAdminEmail = process.env.ADMIN_EMAIL || 'admin@bayti-ai.com';
+        const fallbackAdminPassword = process.env.ADMIN_PASSWORD || 'Admin@Bayti2026';
+        if (normalizedEmail === fallbackAdminEmail.toLowerCase().trim() && password === fallbackAdminPassword) {
+          isPasswordCorrect = true;
+        }
+      }
+
+      if (!isPasswordCorrect) {
+        return res.status(401).json({ success: false, error: 'صلاحيات الإدارة غير صحيحة أو رمز المرور خاطئ.' });
       }
 
       // Simple simulated 2FA code
@@ -1352,7 +1373,10 @@ export function registerAuthRoutes(app: express.Express) {
       const adminEmail = email || process.env.ADMIN_EMAIL || 'admin@bayti-ai.com';
       
       let user = await prisma.user.findFirst({
-        where: { email: { equals: adminEmail, mode: 'insensitive' }, role: 'ADMIN' },
+        where: { 
+          email: { equals: adminEmail, mode: 'insensitive' }, 
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] } 
+        },
         include: { profile: true },
       });
 
@@ -1373,7 +1397,10 @@ export function registerAuthRoutes(app: express.Express) {
         ]);
 
         user = await prisma.user.findFirst({
-          where: { email: { equals: adminEmail, mode: 'insensitive' }, role: 'ADMIN' },
+          where: { 
+            email: { equals: adminEmail, mode: 'insensitive' }, 
+            role: { in: ['ADMIN', 'SUPER_ADMIN'] } 
+          },
           include: { profile: true },
         });
       }

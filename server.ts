@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import cookieParser from 'cookie-parser';
-import { prisma, seedAdminUser } from './db-store.js';
+import { prisma } from './db-store.js';
 import { registerAuthRoutes, getSessionFromRequest } from './auth-routes.js';
 import { aiService } from './server/ai-service.js';
 import { uploadFile } from './server/storage-service.js';
@@ -18,8 +18,8 @@ import {
 } from './server/backup-service.js';
 
 
-// Seed administrator account on launch
-seedAdminUser();
+// Administrative seeding is handled through a secure dedicated bootstrap script
+
 
 const app = express();
 const PORT = 3000;

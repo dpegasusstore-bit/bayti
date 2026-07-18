@@ -12,8 +12,8 @@ interface AdminLoginProps {
 }
 
 export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
-  const [email, setEmail] = useState('admin@bayti-ai.com');
-  const [password, setPassword] = useState('Admin@Bayti2026');
+  const [email, setEmail] = useState('mohamedmahdy2389@gmail.com');
+  const [password, setPassword] = useState('Asdka2ghost2@');
   const [step, setStep] = useState<'login' | '2fa' | 'forgot'>('login');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [error, setError] = useState('');
@@ -103,8 +103,8 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
               <KeyRound className="w-4 h-4" />
               <span>بيانات الدخول التجريبية الخاصة بالمالك:</span>
             </div>
-            <div>البريد: <span className="font-mono text-indigo-400 selection:bg-indigo-900">admin@bayti-ai.com</span></div>
-            <div>كلمة المرور: <span className="font-mono text-indigo-400 selection:bg-indigo-900">Admin@Bayti2026</span></div>
+            <div>البريد: <span className="font-mono text-indigo-400 selection:bg-indigo-900">mohamedmahdy2389@gmail.com</span></div>
+            <div>كلمة المرور: <span className="font-mono text-indigo-400 selection:bg-indigo-900">Asdka2ghost2@</span></div>
           </div>
         )}
 
