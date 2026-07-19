@@ -1,0 +1,530 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  passwordHash  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  role          String    @default("USER") // "USER", "ADMIN", "SUPER_ADMIN"
+
+  profile              Profile?
+  onboarding           Onboarding?
+  familyId             String?
+  family               Family?               @relation(fields: [familyId], references: [id])
+  expenses             Expense[]
+  familyMembers        FamilyMember[]
+  income               Income[]
+  recurringIncome      RecurringIncome[]
+  bills                Bill[]
+  installments         Installment[]
+  associations         Association[]
+  savingsGoals         SavingsGoal[]
+  notifications        Notification[]
+  reminderEvents       ReminderEvent[]
+  aiRequests           AIRequest[]
+  aiUsage              AIUsage?
+  voiceRecords         VoiceRecord[]
+  receiptOCRs          ReceiptOCR[]
+  subscriptions        Subscription[]
+  settings             Settings?
+  devices              Device[]
+  sessions             Session[]
+  activityLogs         ActivityLog[]
+  auditLogs            AuditLog[]
+  supportTickets       SupportTicket[]
+  feedback             Feedback[]
+  referralCode         ReferralCode?
+  referralRewards      ReferralReward[]
+  backups              Backup[]
+}
+
+model Profile {
+  id                     String    @id @default(uuid())
+  userId                 String    @unique
+  fullName               String
+  phone                  String?
+  country                String?   @default("مصر")
+  currency               String?   @default("EGP")
+  language               String?   @default("ar")
+  subscription           String    @default("Standard") // "Standard", "Premium"
+  profilePicture         String?   @default("👨🏻‍💼")
+  createdDate            DateTime  @default(now())
+  lastLogin              DateTime?
+
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Family {
+  id            String         @id @default(uuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  users         User[]
+  members       FamilyMember[]
+}
+
+model FamilyMember {
+  id              String   @id @default(uuid())
+  userId          String
+  familyId        String?
+  name            String
+  avatar          String
+  monthlyBudget   Float    @default(0)
+  spentThisMonth  Float    @default(0)
+  role            String   @default("Member")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family          Family?  @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expenses        Expense[]
+}
+
+model ExpenseCategory {
+  id          String    @id @default(uuid())
+  name        String    @unique // e.g. "Home", "Shopping", "Restaurants"
+  icon        String?
+  createdAt   DateTime  @default(now())
+  
+  expenses    Expense[]
+}
+
+model Expense {
+  id            String   @id @default(uuid())
+  userId        String
+  familyMemberId String?
+  title         String
+  amount        Float
+  date          String   // YYYY-MM-DD
+  time          String   // HH:MM
+  category      String   // Map to Category Name
+  categoryId    String?
+  merchant      String
+  paymentMethod String
+  vat           Float    @default(0)
+  recordedBy    String
+  notes         String   @default("")
+  tags          String[]
+  isDeleted     Boolean  @default(false)
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyMember  FamilyMember? @relation(fields: [familyMemberId], references: [id], onDelete: SetNull)
+  categoryRef   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+}
+
+model Income {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  amount      Float
+  date        String   // YYYY-MM-DD
+  category    String   @default("Salary")
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RecurringIncome {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  amount      Float
+  frequency   String   // "monthly", "weekly"
+  dayOfMonth  Int      @default(25)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Bill {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  amount      Float
+  dueDate     String   // YYYY-MM-DD
+  category    String
+  status      String   @default("unpaid") // "unpaid", "paid"
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Installment {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String
+  totalAmount   Float
+  monthlyAmount Float
+  remainingMonths Int
+  nextDueDate   String   // YYYY-MM-DD
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Association {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String   // e.g. "الجمعية الدورية"
+  totalAmount   Float
+  monthlyShare  Float
+  numberOfMonths Int
+  payoutMonth   Int      // e.g. Month 5
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SavingsGoal {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  targetAmount Float
+  currentAmount Float  @default(0)
+  targetDate  String   // YYYY-MM-DD
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Transaction {
+  id            String   @id @default(uuid())
+  type          String   // "EXPENSE", "INCOME"
+  amount        Float
+  description   String
+  date          DateTime @default(now())
+  referenceId   String?  // Reference to Expense or Income ID
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String
+  title      String
+  message    String
+  timestamp  DateTime @default(now())
+  isRead     Boolean  @default(false)
+  isArchived Boolean  @default(false)
+  priority   String   @default("medium") // "low", "medium", "high"
+  category   String   @default("System")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReminderEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  amount    Float
+  dueDate   String   // YYYY-MM-DD
+  category  String
+  priority  String   @default("medium") // "low", "medium", "high"
+  status    String   @default("upcoming") // "upcoming", "completed", "missed"
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AIRequest {
+  id           String   @id @default(uuid())
+  userId       String
+  model        String
+  feature      String   // "chat" | "ocr" | "voice" | "insights"
+  prompt       String?
+  tokensUsed   Int      @default(0)
+  responseTime Float    @default(0) // seconds
+  timestamp    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AIUsage {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  requestsCount  Int       @default(0)
+  tokensCount    Int       @default(0)
+  monthlyLimit   Int       @default(20)
+  limitResetDate DateTime?
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReceiptOCR {
+  id               String   @id @default(uuid())
+  userId           String
+  imageUrl         String?
+  extractedContent String?
+  timestamp        DateTime @default(now())
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VoiceRecord {
+  id               String   @id @default(uuid())
+  userId           String
+  audioUrl         String?
+  transcription    String?
+  timestamp        DateTime @default(now())
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Currency {
+  id        String   @id @default(uuid())
+  code      String   @unique // e.g. "EGP", "USD"
+  name      String   // e.g. "جنيه مصري"
+  symbol    String   // e.g. "ج.م"
+  rate      Float    @default(1.0)
+}
+
+model Country {
+  id        String   @id @default(uuid())
+  code      String   @unique // e.g. "EG"
+  name      String   // e.g. "مصر"
+  currency  String   // e.g. "EGP"
+}
+
+model Subscription {
+  id             String    @id @default(uuid())
+  userId         String
+  plan           String    @default("Premium")
+  startDate      DateTime  @default(now())
+  endDate        DateTime?
+  status         String    @default("Active") // "Active", "Cancelled", "Expired"
+  paymentMethod  String    @default("Vodafone Cash")
+  renewal        Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments       Payment[]
+}
+
+model Payment {
+  id             String   @id @default(uuid())
+  subscriptionId String
+  amount         Float
+  paymentDate    DateTime @default(now())
+  status         String   @default("Success") // "Success", "Pending", "Failed"
+  paymentMethod  String
+
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+model PaymentProof {
+  id                 String   @id @default(uuid())
+  userId             String
+  userEmail          String
+  fullName           String
+  plan               String   @default("Premium")
+  billingCycle       String   @default("monthly")
+  amount             Float
+  paymentMethod      String
+  vodafoneNumberUsed String?
+  senderNumber       String?
+  screenshotBase64   String
+  status             String   @default("Pending") // "Pending", "Approved", "Rejected"
+  requestDate        DateTime @default(now())
+  actionDate         DateTime?
+  rejectionReason    String?
+}
+
+model PremiumPlan {
+  id           String   @id @default(uuid())
+  name         String   @unique // e.g. "Premium"
+  monthlyPrice Float
+  yearlyPrice  Float
+  features     String[]
+}
+
+model Report {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  type        String   // "monthly", "yearly"
+  summary     String
+  createdAt   DateTime @default(now())
+}
+
+model Settings {
+  id                        String   @id @default(uuid())
+  userId                    String   @unique
+  theme                     String   @default("light")
+  enableNotifications       Boolean  @default(true)
+  betaFeatures              Boolean  @default(false)
+  isPasscodeEnabled         Boolean  @default(false)
+  isFaceIdEnabled           Boolean  @default(false)
+  hideFinancialValues       Boolean  @default(false)
+  hideNotificationsContent  Boolean  @default(false)
+  adminPasscode             String?  @default("")
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Device {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String   // e.g. "iPhone 15"
+  platform  String   // e.g. "iOS"
+  lastUsed  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  details   String?
+  ipAddress String?
+  timestamp DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String   // e.g. "LOGIN", "UPDATE_PASSWORD"
+  ipAddress String?
+  timestamp DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SupportTicket {
+  id          String   @id @default(uuid())
+  userId      String
+  subject     String
+  message     String
+  status      String   @default("open") // "open", "resolved"
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Feedback {
+  id        String   @id @default(uuid())
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReferralCode {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReferralReward {
+  id        String   @id @default(uuid())
+  userId    String
+  referrerId String
+  rewardAmount Float
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AppVersion {
+  id          String   @id @default(uuid())
+  version     String   @unique
+  buildNumber Int
+  forceUpdate Boolean  @default(false)
+  releasedAt  DateTime @default(now())
+}
+
+model SystemConfig {
+  id                 Int      @id @default(1)
+  monthlyPrice       Float    @default(99)
+  yearlyPrice        Float    @default(599)
+  vodafoneNumber     String   @default("01002345678")
+  betaFeatures       Boolean  @default(false)
+  maintenanceMode    Boolean  @default(false)
+  forceUpdate        Boolean  @default(false)
+  aiInsightsEngine   Boolean  @default(true)
+  voiceInputPremium  Boolean  @default(false)
+}
+
+model Onboarding {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  onboardingCompleted Boolean  @default(false)
+  salary              Float    @default(0)
+  otherIncome         Float    @default(0)
+  familyMembersCount  Int      @default(0)
+  ownsCar             Boolean  @default(false)
+  paysInstallments    Boolean  @default(false)
+  participatesInGroup Boolean  @default(false)
+  homeStatus          String   @default("own") // "rent" | "own"
+  wantsGoals          Boolean  @default(false)
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SessionStore {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  isActive  Boolean  @default(true)
+  device    String?
+  platform  String?
+  browser   String?
+  ip        String?
+  country   String?
+  createdAt DateTime @default(now())
+}
+
+model CloudFile {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  url       String
+  mimeType  String
+  size      Int
+  userId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  data      Bytes?   // For database storage fallback mode
+}
+
+model Backup {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  size          Int
+  version       String   @default("1.0")
+  type          String   // "manual", "auto_daily", "auto_weekly", "auto_monthly"
+  encryptedData String   // Encrypted JSON backup payload
+}
+
