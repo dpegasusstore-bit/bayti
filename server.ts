@@ -5,6 +5,8 @@ import { prisma } from './db-store.js';
 import { registerAuthRoutes, getSessionFromRequest } from './auth-routes.js';
 import { aiService } from './server/ai-service.js';
 import { uploadFile } from './server/storage-service.js';
+import { localParseText, localParseReceiptOCR, cleanVoiceTranscript, learnCorrection } from './server/smart-dictionary.js';
+import Tesseract from 'tesseract.js';
 import jwt from 'jsonwebtoken';
 import { 
   createBackup, 
@@ -136,34 +138,125 @@ async function incrementAiUsage(userId: string | undefined) {
   }
 }
 
+// Helper to check AI limit check manually without middleware block for local processing
+async function checkUsageAndReturnIfAllowed(userId: string): Promise<{ allowed: boolean; error?: string; limitReached?: boolean }> {
+  try {
+    const profile = await prisma.profile.findUnique({ where: { userId } });
+    if (!profile) return { allowed: false, error: 'الملف الشخصي غير موجود.' };
+    if (profile.subscription === 'Premium') return { allowed: true };
+
+    const usage = await prisma.aIUsage.upsert({
+      where: { userId },
+      create: {
+        userId,
+        requestsCount: 0,
+        tokensCount: 0,
+        monthlyLimit: 20,
+        limitResetDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
+      },
+      update: {},
+    });
+
+    const now = new Date();
+    const limitReset = usage.limitResetDate ? new Date(usage.limitResetDate) : null;
+    if (!limitReset || limitReset < now) {
+      const nextReset = new Date();
+      nextReset.setMonth(nextReset.getMonth() + 1);
+      await prisma.aIUsage.update({
+        where: { userId },
+        data: {
+          requestsCount: 0,
+          limitResetDate: nextReset,
+        },
+      });
+      usage.requestsCount = 0;
+    }
+
+    if (usage.requestsCount >= usage.monthlyLimit) {
+      return {
+        allowed: false,
+        limitReached: true,
+        error: 'لقد استنفدت الحد الأقصى المجاني (20 عملية ذكاء اصطناعي شهرياً).\n\nقم بالترقية للباقة الممتازة Premium للتمتع باستخدام لانهائي وميزات متقدمة فوراً!'
+      };
+    }
+    return { allowed: true };
+  } catch (err) {
+    console.error('Error checking AI limit allowed:', err);
+    return { allowed: false, error: 'حدث خطأ أثناء التحقق من حدود الذكاء الاصطناعي.' };
+  }
+}
+
 // 1. Parse Arabic Natural Text Input
-app.post('/api/ai/parse-text', verifyAiLimits, async (req, res) => {
+app.post('/api/ai/parse-text', async (req, res) => {
   try {
     const { text, recordedBy } = req.body;
     if (!text) {
       return res.status(400).json({ error: 'Text prompt is required' });
     }
 
-    const result = await aiService.parseText(text, recordedBy);
+    const session = await getSessionFromRequest(req, res);
+    if (!session) {
+      return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجدداً.' });
+    }
+    const userId = session.userId;
+
+    // Step 1: Run Local Processing
+    const localResult = await localParseText(text, userId);
     
+    let finalResult;
+    let confidence = localResult.confidence;
+    let aiUsed = false;
+
+    // Step 2: Confidence Score check
+    if (confidence >= 90) {
+      finalResult = localResult.expense;
+      console.log(`[Local Parsing] High confidence (${confidence}%). Bypassing AI.`);
+    } else {
+      // Step 3: AI Fallback
+      console.log(`[Local Parsing] Low confidence (${confidence}%). Falling back to AI.`);
+      
+      const checkLimit = await checkUsageAndReturnIfAllowed(userId);
+      if (!checkLimit.allowed) {
+        return res.status(checkLimit.limitReached ? 429 : 400).json({
+          success: false,
+          limitReached: checkLimit.limitReached,
+          error: checkLimit.error
+        });
+      }
+
+      const aiResult = await aiService.parseText(text, recordedBy);
+      aiUsed = true;
+      
+      // Merge: Do not let AI overwrite fields confidently matched locally
+      finalResult = {
+        ...aiResult,
+        amount: localResult.expense.amount || aiResult.amount,
+        category: (localResult.confidence >= 60 && localResult.expense.category) ? localResult.expense.category : aiResult.category,
+        merchant: (localResult.confidence >= 60 && localResult.expense.merchant && localResult.expense.merchant !== 'غير محدد') ? localResult.expense.merchant : aiResult.merchant,
+      };
+      
+      await incrementAiUsage(userId);
+    }
+
     const localTime = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
     const expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
-      title: result.title,
-      amount: result.amount,
+      title: finalResult.title,
+      amount: finalResult.amount,
       date: new Date().toISOString().split('T')[0],
       time: localTime,
-      category: result.category,
-      merchant: result.merchant,
-      paymentMethod: result.paymentMethod,
-      vat: result.vat,
-      items: result.items,
+      category: finalResult.category,
+      merchant: finalResult.merchant,
+      paymentMethod: finalResult.paymentMethod,
+      vat: finalResult.vat || 0,
+      items: finalResult.items || [],
       recordedBy: recordedBy || 'أحمد',
-      notes: result.notes,
-      tags: result.tags,
+      notes: finalResult.notes,
+      tags: finalResult.tags || [],
+      aiUsed,
+      confidence
     };
 
-    await incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, expense });
   } catch (error: any) {
     console.error('Error in parse-text:', error);
@@ -172,19 +265,23 @@ app.post('/api/ai/parse-text', verifyAiLimits, async (req, res) => {
 });
 
 // 2. Parse Receipt Photos (OCR + Structure)
-app.post('/api/ai/parse-receipt', verifyAiLimits, async (req, res) => {
+app.post('/api/ai/parse-receipt', async (req, res) => {
   try {
     const { image, recordedBy } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'Base64 image is required' });
     }
 
-    const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
-    const result = await aiService.parseReceipt(cleanBase64, recordedBy);
+    const session = await getSessionFromRequest(req, res);
+    if (!session) {
+      return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجدداً.' });
+    }
+    const userId = session.userId;
 
-    // Optimize and upload receipt image to secure cloud object storage
-    const userId = (req as any).userProfileId;
-    console.log(`[AI Receipt OCR] Optimizing and uploading receipt image to cloud storage for user: ${userId}`);
+    const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
+
+    // Optimize and upload receipt image to secure cloud object storage (so it's saved anyway)
+    console.log(`[Receipt OCR] Uploading receipt image for user: ${userId}`);
     let secureUrl = '';
     try {
       const buffer = Buffer.from(cleanBase64, 'base64');
@@ -196,7 +293,71 @@ app.post('/api/ai/parse-receipt', verifyAiLimits, async (req, res) => {
       );
       secureUrl = uploadRes.url;
     } catch (err: any) {
-      console.error('[AI Receipt OCR] Failed to upload receipt to cloud storage:', err);
+      console.error('[Receipt OCR] Failed to upload receipt:', err);
+    }
+
+    // Step 1: Local OCR extraction using tesseract.js
+    let ocrText = '';
+    let localResult = null;
+    let confidence = 0;
+    
+    try {
+      console.log('[Receipt OCR] Starting local tesseract OCR...');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      const ocrRes = await Tesseract.recognize(buffer, 'ara+eng');
+      ocrText = ocrRes.data.text || '';
+      console.log('[Receipt OCR] Local OCR Text Extracted:', ocrText.slice(0, 300));
+      
+      // Run local dictionary matching on OCR text
+      localResult = localParseReceiptOCR(ocrText, userId);
+      confidence = localResult.confidence;
+    } catch (ocrErr: any) {
+      console.error('[Receipt OCR] Local OCR failed or timed out:', ocrErr.message);
+      confidence = 0;
+    }
+
+    let finalResult;
+    let aiUsed = false;
+
+    // Step 2: Confidence Check
+    if (confidence >= 90 && localResult) {
+      finalResult = localResult.expense;
+      console.log(`[Receipt OCR] High confidence (${confidence}%). Bypassing AI OCR.`);
+    } else {
+      // Step 3: AI Fallback
+      console.log(`[Receipt OCR] Low confidence (${confidence}%). Falling back to AI OCR.`);
+      
+      const checkLimit = await checkUsageAndReturnIfAllowed(userId);
+      if (!checkLimit.allowed) {
+        if (localResult && localResult.expense.amount > 0) {
+          finalResult = localResult.expense;
+          console.log('[Receipt OCR] Returning partial local OCR due to AI limit.');
+        } else {
+          return res.status(checkLimit.limitReached ? 429 : 400).json({
+            success: false,
+            limitReached: checkLimit.limitReached,
+            error: checkLimit.error
+          });
+        }
+      } else {
+        const aiResult = await aiService.parseReceipt(cleanBase64, recordedBy);
+        aiUsed = true;
+        
+        // Merge: keep confident local matches
+        if (localResult) {
+          finalResult = {
+            ...aiResult,
+            amount: localResult.expense.amount || aiResult.amount,
+            category: (localResult.confidence >= 60 && localResult.expense.category) ? localResult.expense.category : aiResult.category,
+            merchant: (localResult.confidence >= 60 && localResult.expense.merchant && localResult.expense.merchant !== 'غير محدد') ? localResult.expense.merchant : aiResult.merchant,
+            vat: localResult.expense.vat || aiResult.vat,
+          };
+        } else {
+          finalResult = aiResult;
+        }
+        
+        await incrementAiUsage(userId);
+      }
     }
 
     // Connect everything with PostgreSQL by storing the ReceiptOCR record
@@ -206,35 +367,36 @@ app.post('/api/ai/parse-receipt', verifyAiLimits, async (req, res) => {
           data: {
             userId,
             imageUrl: secureUrl || null,
-            extractedContent: JSON.stringify(result),
+            extractedContent: JSON.stringify(finalResult),
             timestamp: new Date(),
           },
         });
-        console.log(`[AI Receipt OCR] Registered ReceiptOCR inside PostgreSQL successfully.`);
+        console.log(`[Receipt OCR] Stored ReceiptOCR metadata inside PostgreSQL successfully.`);
       } catch (dbErr) {
-        console.error('[AI Receipt OCR] Failed to write ReceiptOCR metadata to PostgreSQL:', dbErr);
+        console.error('[Receipt OCR] Failed to write ReceiptOCR metadata to PostgreSQL:', dbErr);
       }
     }
 
     const localTime = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
     const expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
-      title: result.title || `فاتورة من ${result.merchant || 'محل'}`,
-      amount: result.amount,
+      title: finalResult.title || `فاتورة من ${finalResult.merchant || 'محل'}`,
+      amount: finalResult.amount,
       date: new Date().toISOString().split('T')[0],
       time: localTime,
-      category: result.category || 'Home',
-      merchant: result.merchant,
-      paymentMethod: result.paymentMethod,
-      vat: result.vat,
-      items: result.items,
+      category: finalResult.category || 'Home',
+      merchant: finalResult.merchant,
+      paymentMethod: finalResult.paymentMethod,
+      vat: finalResult.vat || 0,
+      items: finalResult.items || [],
       recordedBy: recordedBy || 'أحمد',
-      notes: result.notes,
-      tags: result.tags,
-      imageUrl: secureUrl, // Include the secure URL in the response
+      notes: finalResult.notes || 'تم الاستخراج عبر مسح الفاتورة',
+      tags: finalResult.tags || [],
+      imageUrl: secureUrl,
+      aiUsed,
+      confidence
     };
 
-    await incrementAiUsage(userId);
     res.json({ success: true, expense });
   } catch (error: any) {
     console.error('Error in parse-receipt:', error);
@@ -243,40 +405,122 @@ app.post('/api/ai/parse-receipt', verifyAiLimits, async (req, res) => {
 });
 
 // 3. Parse Natural Voice Input
-app.post('/api/ai/parse-voice', verifyAiLimits, async (req, res) => {
+app.post('/api/ai/parse-voice', async (req, res) => {
   try {
     const { audio, mimeType, recordedBy } = req.body;
     if (!audio) {
       return res.status(400).json({ error: 'Base64 audio is required' });
     }
 
+    const session = await getSessionFromRequest(req, res);
+    if (!session) {
+      return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجدداً.' });
+    }
+    const userId = session.userId;
+
     const cleanBase64 = audio.replace(/^data:audio\/\w+;base64,/, '');
     const cleanMimeType = mimeType || 'audio/webm';
 
-    const result = await aiService.parseVoice(cleanBase64, cleanMimeType, recordedBy);
+    console.log('[Voice Registration] Requesting transcript from Gemini...');
+    
+    const checkLimit = await checkUsageAndReturnIfAllowed(userId);
+    if (!checkLimit.allowed) {
+      return res.status(checkLimit.limitReached ? 429 : 400).json({
+        success: false,
+        limitReached: checkLimit.limitReached,
+        error: checkLimit.error
+      });
+    }
+
+    const audioPart = {
+      inlineData: { mimeType: cleanMimeType, data: cleanBase64 },
+    };
+    
+    let transcript = '';
+    try {
+      const response = await (aiService as any).activeProvider.ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: [
+          audioPart,
+          { text: 'اكتب النص المنطوق في هذا التسجيل الصوتي المالي بدقة شديدة وباللغة العربية العامية أو الفصحى وبدون أي مقدمات أو شروحات.' },
+        ],
+      });
+      transcript = response.text.trim();
+      console.log('[Voice Registration] Extracted transcript:', transcript);
+    } catch (transErr: any) {
+      console.error('[Voice Registration] Failed to transcribe voice:', transErr);
+      throw new Error('Failed to transcribe voice audio.');
+    }
+
+    const cleanedTranscript = cleanVoiceTranscript(transcript);
+    console.log('[Voice Registration] Cleaned Transcript:', cleanedTranscript);
+
+    // Run local parser on transcript
+    const localResult = await localParseText(cleanedTranscript, userId);
+    let finalResult;
+    let confidence = localResult.confidence;
+    let aiUsed = false;
+
+    if (confidence >= 90) {
+      finalResult = localResult.expense;
+      console.log(`[Voice Registration] High confidence (${confidence}%). Bypassing structured AI parsing.`);
+    } else {
+      console.log(`[Voice Registration] Low confidence (${confidence}%). Falling back to structured AI parsing.`);
+      
+      const aiResult = await aiService.parseText(cleanedTranscript, recordedBy);
+      aiUsed = true;
+      
+      // Merge
+      finalResult = {
+        ...aiResult,
+        amount: localResult.expense.amount || aiResult.amount,
+        category: (localResult.confidence >= 60 && localResult.expense.category) ? localResult.expense.category : aiResult.category,
+        merchant: (localResult.confidence >= 60 && localResult.expense.merchant && localResult.expense.merchant !== 'غير محدد') ? localResult.expense.merchant : aiResult.merchant,
+      };
+    }
+
+    // Increment AI usage once (since we did at least one AI transcription)
+    await incrementAiUsage(userId);
 
     const localTime = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
     const expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
-      title: result.title || 'تسجيل صوتي مالي',
-      amount: result.amount,
+      title: finalResult.title || 'تسجيل صوتي مالي',
+      amount: finalResult.amount,
       date: new Date().toISOString().split('T')[0],
       time: localTime,
-      category: result.category || 'Home',
-      merchant: result.merchant,
-      paymentMethod: result.paymentMethod,
-      vat: result.vat,
-      items: result.items,
+      category: finalResult.category || 'Home',
+      merchant: finalResult.merchant,
+      paymentMethod: finalResult.paymentMethod,
+      vat: finalResult.vat || 0,
+      items: finalResult.items || [],
       recordedBy: recordedBy || 'أحمد',
-      notes: result.notes || 'تمت الإضافة عبر التسجيل الصوتي',
-      tags: result.tags,
+      notes: finalResult.notes || `نص التسجيل: "${transcript}"`,
+      tags: finalResult.tags || [],
+      aiUsed,
+      confidence
     };
 
-    await incrementAiUsage((req as any).userProfileId);
     res.json({ success: true, expense });
   } catch (error: any) {
     console.error('Error in parse-voice:', error);
     res.status(500).json({ error: error.message || 'Failed to parse voice message' });
+  }
+});
+
+// 4. Learn User Corrections dynamically for the Smart Dictionary
+app.post('/api/ai/learn-correction', async (req, res) => {
+  try {
+    const { sentence, correctResult } = req.body;
+    if (!sentence || !correctResult) {
+      return res.status(400).json({ error: 'Sentence and correctResult are required' });
+    }
+    
+    learnCorrection(sentence, correctResult);
+    res.json({ success: true, message: 'Correction learned successfully' });
+  } catch (error: any) {
+    console.error('Error in learn-correction:', error);
+    res.status(500).json({ error: error.message || 'Failed to learn correction' });
   }
 });
 

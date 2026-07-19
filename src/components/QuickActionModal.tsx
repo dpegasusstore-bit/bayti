@@ -39,6 +39,66 @@ export default function QuickActionModal({
   const [error, setError] = useState<string | null>(null);
   const [successExpense, setSuccessExpense] = useState<Expense | null>(null);
 
+  // Correction and editing states
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
+  const [editedAmount, setEditedAmount] = useState<number>(0);
+  const [editedCategory, setEditedCategory] = useState<string>('Home');
+  const [editedMerchant, setEditedMerchant] = useState('');
+  const [editedPaymentMethod, setEditedPaymentMethod] = useState<'Cash' | 'Card' | 'Wallet'>('Cash');
+  const [correctionFeedback, setCorrectionFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (successExpense) {
+      setEditedTitle(successExpense.title || '');
+      setEditedAmount(successExpense.amount || 0);
+      setEditedCategory(successExpense.category || 'Home');
+      setEditedMerchant(successExpense.merchant || 'غير محدد');
+      setEditedPaymentMethod((successExpense.paymentMethod as 'Cash' | 'Card' | 'Wallet') || 'Cash');
+      setIsEditing(false);
+      setCorrectionFeedback(null);
+    }
+  }, [successExpense]);
+
+  const handleSaveCorrection = async () => {
+    if (!successExpense) return;
+
+    const correctedExpense: Expense = {
+      ...successExpense,
+      title: editedTitle,
+      amount: Number(editedAmount) || 0,
+      category: editedCategory as CategoryType,
+      merchant: editedMerchant,
+      paymentMethod: editedPaymentMethod,
+    };
+
+    try {
+      const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
+      const originalText = textSentence || (successExpense.notes && successExpense.notes.startsWith('نص التسجيل:') ? successExpense.notes.replace('نص التسجيل: "', '').replace('"', '') : '');
+      
+      if (originalText) {
+        await fetch('/api/ai/learn-correction', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            sentence: originalText,
+            correctResult: correctedExpense
+          })
+        });
+      }
+
+      onAddExpense(correctedExpense);
+      setSuccessExpense(correctedExpense);
+      setIsEditing(false);
+      setCorrectionFeedback('رائع! تم حفظ التعديل وتعليم المحرك المحلي تفضيلك الجديد بنجاح 🎉');
+    } catch (err) {
+      console.error('[Correction] Failed to save learning:', err);
+    }
+  };
+
   // Text state
   const [textSentence, setTextSentence] = useState('');
 
@@ -532,65 +592,178 @@ export default function QuickActionModal({
                 <h3 className="text-sm font-bold">تم الاستخراج والإضافة بنجاح!</h3>
               </div>
 
-              {/* Parsed Output Details Card */}
-              <div className="bg-white rounded-xl p-3 border border-emerald-50 shadow-sm text-xs space-y-2.5">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400">اسم المصروف</span>
-                  <span className="font-bold text-slate-800">{successExpense.title}</span>
+              {correctionFeedback && (
+                <div className="mb-3 p-2.5 bg-emerald-100 text-emerald-800 rounded-xl text-[11px] font-medium leading-relaxed text-right" style={{ direction: 'rtl' }}>
+                  {correctionFeedback}
                 </div>
-                <div className="flex justify-between items-center border-t border-slate-50 pt-2">
-                  <span className="text-slate-400">القيمة المالية</span>
-                  <span className="font-bold text-blue-600 text-sm">{successExpense.amount} ج.م</span>
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-50 pt-2">
-                  <span className="text-slate-400">الفئة</span>
-                  <span className="font-semibold bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-full text-[10px]">
-                    {successExpense.category === 'Home' ? '🏠 المنزل' :
-                     successExpense.category === 'Shopping' ? '🛍️ التسوق' :
-                     successExpense.category === 'Restaurants' ? '🍔 المطاعم' :
-                     successExpense.category === 'Transportation' ? '🚗 المواصلات' :
-                     successExpense.category === 'Bills' ? '⚡ الفواتير' :
-                     successExpense.category === 'Health' ? '🏥 الصحة' :
-                     successExpense.category === 'Education' ? '📚 التعليم' :
-                     successExpense.category === 'Travel' ? '✈️ السفر' :
-                     successExpense.category === 'Entertainment' ? '🎪 الترفيه' : '💼 العمل'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-50 pt-2">
-                  <span className="text-slate-400">التاجر</span>
-                  <span className="font-semibold text-slate-700">{successExpense.merchant}</span>
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-50 pt-2">
-                  <span className="text-slate-400">طريقة الدفع</span>
-                  <span className="text-slate-700">
-                    {successExpense.paymentMethod === 'Card' ? '💳 بطاقة مصرفية' : 
-                     successExpense.paymentMethod === 'Wallet' ? '📱 محفظة ذكية' : '💵 كاش / نقدي'}
-                  </span>
-                </div>
-                
-                {successExpense.items && successExpense.items.length > 0 && (
-                  <div className="border-t border-slate-100 pt-2.5 mt-2">
-                    <span className="text-slate-400 block mb-1">المشتريات التفصيلية:</span>
-                    <div className="bg-slate-50 rounded-lg p-2 space-y-1">
-                      {successExpense.items.map((item, idx) => (
-                        <div key={idx} className="flex justify-between text-[11px] text-slate-600">
-                          <span>• {item.name}</span>
-                          <span className="font-medium">{item.price} ج.م</span>
-                        </div>
-                      ))}
+              )}
+
+              {isEditing ? (
+                /* Inline Correction Form */
+                <div className="bg-white rounded-xl p-3 border border-emerald-50 shadow-sm text-xs space-y-3 text-right" style={{ direction: 'rtl' }}>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">اسم المصروف:</label>
+                    <input
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      className="w-full p-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">المبلغ (ج.م):</label>
+                      <input
+                        type="number"
+                        value={editedAmount}
+                        onChange={(e) => setEditedAmount(parseFloat(e.target.value) || 0)}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">التاجر / المحل:</label>
+                      <input
+                        type="text"
+                        value={editedMerchant}
+                        onChange={(e) => setEditedMerchant(e.target.value)}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                      />
                     </div>
                   </div>
-                )}
-              </div>
 
-              <div className="flex gap-2 justify-end mt-4">
-                <button
-                  onClick={() => setSuccessExpense(null)}
-                  className="bg-emerald-600 text-white px-5 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-100"
-                >
-                  حسناً، رائع
-                </button>
-              </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">الفئة المصرفية:</label>
+                      <select
+                        value={editedCategory}
+                        onChange={(e) => setEditedCategory(e.target.value)}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-[11px] outline-none bg-white focus:border-blue-500"
+                      >
+                        <option value="Home">🏠 المنزل</option>
+                        <option value="Shopping">🛍️ التسوق</option>
+                        <option value="Restaurants">🍔 المطاعم</option>
+                        <option value="Transportation">🚗 المواصلات</option>
+                        <option value="Bills">⚡ الفواتير</option>
+                        <option value="Health">🏥 الصحة</option>
+                        <option value="Education">📚 التعليم</option>
+                        <option value="Travel">✈️ السفر</option>
+                        <option value="Entertainment">🎪 الترفيه</option>
+                        <option value="Work">💼 العمل</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">طريقة الدفع:</label>
+                      <select
+                        value={editedPaymentMethod}
+                        onChange={(e) => setEditedPaymentMethod(e.target.value as 'Cash' | 'Card' | 'Wallet')}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-[11px] outline-none bg-white focus:border-blue-500"
+                      >
+                        <option value="Cash">💵 كاش / نقدي</option>
+                        <option value="Card">💳 بطاقة مصرفية</option>
+                        <option value="Wallet">📱 محفظة ذكية</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-2">
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-semibold transition-colors"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      onClick={handleSaveCorrection}
+                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition-colors shadow-sm"
+                    >
+                      حفظ وتدريب المحرك المحلي ✨
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Parsed Output Details Card */
+                <div className="bg-white rounded-xl p-3 border border-emerald-50 shadow-sm text-xs space-y-2.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">اسم المصروف</span>
+                    <span className="font-bold text-slate-800">{successExpense.title}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-50 pt-2">
+                    <span className="text-slate-400">القيمة المالية</span>
+                    <span className="font-bold text-blue-600 text-sm">{successExpense.amount} ج.م</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-50 pt-2">
+                    <span className="text-slate-400">الفئة</span>
+                    <span className="font-semibold bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-full text-[10px]">
+                      {successExpense.category === 'Home' ? '🏠 المنزل' :
+                       successExpense.category === 'Shopping' ? '🛍️ التسوق' :
+                       successExpense.category === 'Restaurants' ? '🍔 المطاعم' :
+                       successExpense.category === 'Transportation' ? '🚗 المواصلات' :
+                       successExpense.category === 'Bills' ? '⚡ الفواتير' :
+                       successExpense.category === 'Health' ? '🏥 الصحة' :
+                       successExpense.category === 'Education' ? '📚 التعليم' :
+                       successExpense.category === 'Travel' ? '✈️ السفر' :
+                       successExpense.category === 'Entertainment' ? '🎪 الترفيه' : '💼 العمل'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-50 pt-2">
+                    <span className="text-slate-400">التاجر</span>
+                    <span className="font-semibold text-slate-700">{successExpense.merchant}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-50 pt-2">
+                    <span className="text-slate-400">طريقة الدفع</span>
+                    <span className="text-slate-700">
+                      {successExpense.paymentMethod === 'Card' ? '💳 بطاقة مصرفية' : 
+                       successExpense.paymentMethod === 'Wallet' ? '📱 محفظة ذكية' : '💵 كاش / نقدي'}
+                    </span>
+                  </div>
+                  
+                  {successExpense.items && successExpense.items.length > 0 && (
+                    <div className="border-t border-slate-100 pt-2.5 mt-2">
+                      <span className="text-slate-400 block mb-1">المشتريات التفصيلية:</span>
+                      <div className="bg-slate-50 rounded-lg p-2 space-y-1">
+                        {successExpense.items.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-[11px] text-slate-600">
+                            <span>• {item.name}</span>
+                            <span className="font-medium">{item.price} ج.م</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Heuristic pipeline stats */}
+                  <div className="border-t border-slate-100 pt-2 mt-2 flex justify-between items-center text-[9px] text-slate-400">
+                    <span>ثقة المطابقة المحلية:</span>
+                    <span className="font-mono bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded">
+                      {(successExpense as any).confidence !== undefined ? `${(successExpense as any).confidence}%` : '100%'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-[9px] text-slate-400">
+                    <span>تفعيل خادم الذكاء الاصطناعي:</span>
+                    <span className="font-mono bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded">
+                      {(successExpense as any).aiUsed ? 'نعم (استدعاء سحابي)' : 'لا (توفير طاقة ومعالجة محلية)'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {!isEditing && (
+                <div className="flex gap-2 justify-between mt-4">
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                  >
+                    ✏️ تصحيح البيانات المكتشفة
+                  </button>
+                  <button
+                    onClick={() => setSuccessExpense(null)}
+                    className="bg-emerald-600 text-white px-5 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-100"
+                  >
+                    حسناً، رائع
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
