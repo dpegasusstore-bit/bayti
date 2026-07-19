@@ -21,7 +21,7 @@ import {
 // Administrative seeding is handled through a secure dedicated bootstrap script
 
 
-const app = express();
+export const app = express();
 const PORT = 3000;
 
 // Enable cookies parsing for HTTP-only JWT secure sessions
@@ -694,4 +694,6 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
