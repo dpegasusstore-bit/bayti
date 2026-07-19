@@ -365,6 +365,7 @@ model Settings {
   isFaceIdEnabled           Boolean  @default(false)
   hideFinancialValues       Boolean  @default(false)
   hideNotificationsContent  Boolean  @default(false)
+  adminPasscode             String?  @default("")
 
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

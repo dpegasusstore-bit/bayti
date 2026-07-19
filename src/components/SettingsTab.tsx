@@ -61,6 +61,8 @@ interface SettingsTabProps {
   onChangeCurrency: (currency: string) => void;
   onOpenExport: () => void;
   onOpenPremium: () => void;
+  adminPasscode?: string;
+  onSaveAdminPasscode?: (passcode: string) => Promise<void>;
 }
 
 export default function SettingsTab({
@@ -85,7 +87,9 @@ export default function SettingsTab({
   activeCurrency,
   onChangeCurrency,
   onOpenExport,
-  onOpenPremium
+  onOpenPremium,
+  adminPasscode = '',
+  onSaveAdminPasscode
 }: SettingsTabProps) {
   // Local UI state for Cloud Backups and Help Center
   const [backupsList, setBackupsList] = useState<any[]>([]);
@@ -97,6 +101,36 @@ export default function SettingsTab({
   const [uploadError, setUploadError] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  // Admin Security Passcode States
+  const [adminPasscodeInput, setAdminPasscodeInput] = useState(adminPasscode);
+  const [isSavingAdminPasscode, setIsSavingAdminPasscode] = useState(false);
+  const [adminPasscodeSuccess, setAdminPasscodeSuccess] = useState('');
+  const [adminPasscodeError, setAdminPasscodeError] = useState('');
+
+  useEffect(() => {
+    setAdminPasscodeInput(adminPasscode);
+  }, [adminPasscode]);
+
+  const handleSaveAdminPasscodeLocal = async () => {
+    setAdminPasscodeError('');
+    setAdminPasscodeSuccess('');
+    if (!adminPasscodeInput || adminPasscodeInput.trim().length < 4) {
+      setAdminPasscodeError('رمز الأمان يجب أن يتكون من 4 خانات على الأقل.');
+      return;
+    }
+    setIsSavingAdminPasscode(true);
+    try {
+      if (onSaveAdminPasscode) {
+        await onSaveAdminPasscode(adminPasscodeInput.trim());
+        setAdminPasscodeSuccess('تم حفظ رمز الأمان للدخول الإداري بنجاح! 👑');
+      }
+    } catch (err) {
+      setAdminPasscodeError('حدث خطأ أثناء حفظ رمز الأمان.');
+    } finally {
+      setIsSavingAdminPasscode(false);
+    }
+  };
 
   // Fetch Backups from database
   const fetchBackups = async () => {
@@ -482,19 +516,30 @@ export default function SettingsTab({
         </div>
 
         {/* Action triggers */}
-        <div className="flex items-center justify-between pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
           <button
             onClick={() => setIsEditingProfile(!isEditingProfile)}
-            className="text-xs font-black text-blue-600 hover:text-blue-700 flex items-center gap-1.5 transition-all bg-blue-50 hover:bg-blue-100 dark:bg-slate-800/50 px-4 py-2.5 rounded-xl border border-blue-50 dark:border-slate-800"
+            className="text-xs font-black text-blue-600 hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all bg-blue-50 hover:bg-blue-100 dark:bg-slate-800/50 px-4 py-2.5 rounded-xl border border-blue-50 dark:border-slate-800 w-full"
           >
             <Settings className="w-3.5 h-3.5" />
             <span>تعديل الملف وتغيير كلمة المرور</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = '/admin/login';
+            }}
+            className="text-xs font-black text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center justify-center gap-1.5 transition-all bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 px-4 py-2.5 rounded-xl border border-indigo-100 dark:border-indigo-900/20 w-full"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>لوحة تحكم السوبر أدمن 👑</span>
+          </button>
+
           {onLogout && (
             <button
               onClick={onLogout}
-              className="text-xs font-black text-rose-600 hover:text-rose-700 flex items-center gap-1.5 transition-all bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 px-4 py-2.5 rounded-xl border border-rose-50 dark:border-rose-900/10"
+              className="text-xs font-black text-rose-600 hover:text-rose-700 flex items-center justify-center gap-1.5 transition-all bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 px-4 py-2.5 rounded-xl border border-rose-50 dark:border-rose-900/10 w-full"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>تسجيل الخروج</span>
@@ -985,6 +1030,37 @@ export default function SettingsTab({
             >
               <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${hideNotificationsContent ? 'right-6' : 'right-1'}`} />
             </button>
+          </div>
+
+          {/* Admin Security Passcode Customization */}
+          <div className="border-t border-slate-100 dark:border-slate-800 pt-3.5 mt-3.5 space-y-2">
+            <h4 className="font-bold text-xs text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              <span>رمز الأمان لوحة التحكم الإدارية (/admin)</span>
+              <span className="text-[9px] bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-black px-2 py-0.5 rounded-full">سوبر أدمن 👑</span>
+            </h4>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              عيّن رمز أمان مخصص (أرقام أو حروف) لتتمكن من فتح لوحة التحكم الإدارية مباشرة عبر الرابط الخاص بك بنفس الحساب.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <input
+                type="text"
+                maxLength={12}
+                placeholder="أدخل رمز الأمان الخاص بك"
+                value={adminPasscodeInput}
+                onChange={(e) => setAdminPasscodeInput(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs font-mono w-full sm:w-48 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={handleSaveAdminPasscodeLocal}
+                disabled={isSavingAdminPasscode}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all flex items-center justify-center gap-1 shadow-md shadow-indigo-600/10 w-full sm:w-auto"
+              >
+                {isSavingAdminPasscode ? 'جاري الحفظ...' : 'حفظ رمز الأمان 💾'}
+              </button>
+            </div>
+            {adminPasscodeError && <p className="text-[10px] text-rose-500 font-bold mt-1">{adminPasscodeError}</p>}
+            {adminPasscodeSuccess && <p className="text-[10px] text-emerald-500 font-bold mt-1">{adminPasscodeSuccess}</p>}
           </div>
         </div>
       </div>

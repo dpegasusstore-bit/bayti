@@ -196,6 +196,30 @@ export const api = {
     return result;
   },
 
+  async verifyAdminPasscode(passcode: string) {
+    const res = await fetch('/api/admin/auth/verify-passcode', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ passcode })
+    });
+    const result = await res.json();
+    if (result.success) {
+      // Set the admin session locally to mirror the verified state
+      const session = {
+        email: result.user.email,
+        loggedInAt: new Date().toISOString(),
+        role: result.user.role
+      };
+      localStorage.setItem('bayti_admin_session', JSON.stringify(session));
+      // Also copy the user token to admin token so admin APIs work if needed
+      const userToken = localStorage.getItem('bayti_user_token');
+      if (userToken) {
+        localStorage.setItem('bayti_admin_token', userToken);
+      }
+    }
+    return result;
+  },
+
   async getAdminStats() {
     const res = await fetch('/api/admin/stats', {
       method: 'GET',

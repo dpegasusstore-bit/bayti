@@ -68,6 +68,7 @@ export default function App() {
   const [hideFinancialValues, setHideFinancialValues] = useState<boolean>(false);
   const [hideNotificationsContent, setHideNotificationsContent] = useState<boolean>(false);
   const [activeCurrency, setActiveCurrency] = useState<string>('EGP');
+  const [adminPasscode, setAdminPasscode] = useState<string>('');
 
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
   const [isSplashFinished, setIsSplashFinished] = useState<boolean>(false);
@@ -119,11 +120,13 @@ export default function App() {
               setIsFaceIdEnabled(res.settings.isFaceIdEnabled);
               setHideFinancialValues(res.settings.hideFinancialValues);
               setHideNotificationsContent(res.settings.hideNotificationsContent);
+              setAdminPasscode(res.settings.adminPasscode || '');
               
               localStorage.setItem('bayti_passcode_enabled', String(res.settings.isPasscodeEnabled));
               localStorage.setItem('bayti_faceid_enabled', String(res.settings.isFaceIdEnabled));
               localStorage.setItem('bayti_hide_values', String(res.settings.hideFinancialValues));
               localStorage.setItem('bayti_hide_notifications', String(res.settings.hideNotificationsContent));
+              localStorage.setItem('bayti_admin_security_passcode', res.settings.adminPasscode || '');
               
               if (!res.settings.isPasscodeEnabled) {
                 setIsUnlocked(true);
@@ -268,12 +271,14 @@ export default function App() {
     const localHideValues = localStorage.getItem('bayti_hide_values') === 'true';
     const localHideNotifications = localStorage.getItem('bayti_hide_notifications') === 'true';
     const localCurrency = localStorage.getItem('bayti_active_currency') || 'EGP';
+    const localAdminPasscode = localStorage.getItem('bayti_admin_security_passcode') || '';
 
     setIsPasscodeEnabled(localPasscodeEnabled);
     setIsFaceIdEnabled(localFaceIdEnabled);
     setHideFinancialValues(localHideValues);
     setHideNotificationsContent(localHideNotifications);
     setActiveCurrency(localCurrency);
+    setAdminPasscode(localAdminPasscode);
 
     if (!localPasscodeEnabled) {
       setIsUnlocked(true);
@@ -693,6 +698,18 @@ export default function App() {
     }
   };
 
+  const handleSaveAdminPasscode = async (passcode: string) => {
+    setAdminPasscode(passcode);
+    localStorage.setItem('bayti_admin_security_passcode', passcode);
+    if (userToken) {
+      try {
+        await api.updateProfile({ adminPasscode: passcode });
+      } catch (err) {
+        console.error('Failed to sync admin passcode:', err);
+      }
+    }
+  };
+
   const handleToggleFaceId = async () => {
     const nextVal = !isFaceIdEnabled;
     setIsFaceIdEnabled(nextVal);
@@ -923,6 +940,8 @@ export default function App() {
             onChangeCurrency={handleCurrencyChange}
             onOpenExport={() => setShowExportModal(true)}
             onOpenPremium={() => setShowPremiumModal(true)}
+            adminPasscode={adminPasscode}
+            onSaveAdminPasscode={handleSaveAdminPasscode}
           />
         )}
 

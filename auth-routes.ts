@@ -784,7 +784,8 @@ export function registerAuthRoutes(app: express.Express) {
         isPasscodeEnabled,
         isFaceIdEnabled,
         hideFinancialValues,
-        hideNotificationsContent
+        hideNotificationsContent,
+        adminPasscode
       } = req.body;
       const userId = session.userId;
 
@@ -822,6 +823,7 @@ export function registerAuthRoutes(app: express.Express) {
           isFaceIdEnabled: !!isFaceIdEnabled,
           hideFinancialValues: !!hideFinancialValues,
           hideNotificationsContent: !!hideNotificationsContent,
+          adminPasscode: adminPasscode || "",
         },
         update: {
           theme: theme !== undefined ? theme : undefined,
@@ -830,6 +832,7 @@ export function registerAuthRoutes(app: express.Express) {
           isFaceIdEnabled: isFaceIdEnabled !== undefined ? !!isFaceIdEnabled : undefined,
           hideFinancialValues: hideFinancialValues !== undefined ? !!hideFinancialValues : undefined,
           hideNotificationsContent: hideNotificationsContent !== undefined ? !!hideNotificationsContent : undefined,
+          adminPasscode: adminPasscode !== undefined ? adminPasscode : undefined,
         },
       });
 
@@ -1359,6 +1362,55 @@ export function registerAuthRoutes(app: express.Express) {
     } catch (error: any) {
       console.error('Admin auth login error:', error);
       res.status(500).json({ success: false, error: 'حدث خطأ أثناء المصادقة الإدارية.' });
+    }
+  });
+
+  // Verify customizable admin passcode set by user in standard settings
+  app.post('/api/admin/auth/verify-passcode', async (req, res) => {
+    try {
+      const session = await getSessionFromRequest(req);
+      if (!session) {
+        return res.status(401).json({ success: false, error: 'يرجى تسجيل الدخول بحسابك أولاً.' });
+      }
+
+      const { passcode } = req.body;
+      if (!passcode) {
+        return res.status(400).json({ success: false, error: 'يرجى إدخال رمز الأمان.' });
+      }
+
+      const userId = session.userId;
+      const settings = await prisma.settings.findUnique({
+        where: { userId }
+      });
+
+      if (!settings || !settings.adminPasscode) {
+        return res.status(400).json({ success: false, error: 'يرجى تعيين رمز الأمان للدخول الإداري أولاً من إعدادات حسابك.' });
+      }
+
+      if (settings.adminPasscode.trim() !== passcode.trim()) {
+        return res.status(401).json({ success: false, error: 'رمز الأمان للدخول الإداري غير صحيح.' });
+      }
+
+      // Promote user to SUPER_ADMIN to allow accessing all admin APIs with their existing token!
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: { role: 'SUPER_ADMIN' },
+        include: { profile: true }
+      });
+
+      res.json({
+        success: true,
+        message: 'تم تفعيل صلاحيات الإدارة بنجاح.',
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          role: updatedUser.role,
+        },
+        profile: updatedUser.profile,
+      });
+    } catch (error: any) {
+      console.error('Verify admin passcode error:', error);
+      res.status(500).json({ success: false, error: 'حدث خطأ أثناء التحقق من رمز الأمان.' });
     }
   });
 

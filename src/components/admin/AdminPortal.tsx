@@ -29,6 +29,11 @@ export default function AdminPortal() {
   // --- Standard Client-side SPA Router ---
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
 
+  // Custom passcode gate states
+  const [passcodeGateInput, setPasscodeGateInput] = useState('');
+  const [gateError, setGateError] = useState('');
+  const [isVerifyingGate, setIsVerifyingGate] = useState(false);
+
   useEffect(() => {
     const handleLocationChange = () => {
       setCurrentPath(window.location.pathname);
@@ -197,6 +202,30 @@ export default function AdminPortal() {
   // Is this an active normal USER of the main app?
   // We can verify if onboarding was completed by checking 'bayti_onboarding_completed' in localStorage.
   const isOnboardingCompleted = localStorage.getItem('bayti_onboarding_completed') === 'true';
+  const hasUserToken = !!localStorage.getItem('bayti_user_token');
+  const storedPasscode = localStorage.getItem('bayti_admin_security_passcode') || '';
+
+  const handleVerifyPasscode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGateError('');
+    if (!passcodeGateInput.trim()) {
+      setGateError('يرجى إدخال رمز الأمان.');
+      return;
+    }
+    setIsVerifyingGate(true);
+    try {
+      const res = await api.verifyAdminPasscode(passcodeGateInput.trim());
+      if (res.success) {
+        handleLoginSuccess(res.user.email);
+      } else {
+        setGateError(res.error || 'رمز الأمان غير صحيح، يرجى المحاولة مرة أخرى.');
+      }
+    } catch (err) {
+      setGateError('حدث خطأ أثناء محاولة التحقق بالاتصال بالخادم.');
+    } finally {
+      setIsVerifyingGate(false);
+    }
+  };
 
   if (!adminSession) {
     // If they explicitly navigate to /admin/login, let them login
@@ -204,44 +233,96 @@ export default function AdminPortal() {
       return <AdminLogin onLoginSuccess={handleLoginSuccess} />;
     }
 
-    // If they are a normal authenticated USER (onboarding completed), return 403 Forbidden
-    if (isOnboardingCompleted) {
+    // If they have a user token (logged in as normal user), let them login using their custom security passcode!
+    if (hasUserToken) {
+      if (!storedPasscode || storedPasscode.trim() === '') {
+        return (
+          <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans" dir="rtl">
+            <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-80 h-80 bg-indigo-900/10 rounded-full blur-[100px] pointer-events-none" />
+            
+            <div className="w-full max-w-lg bg-slate-900/70 border border-indigo-500/15 rounded-3xl p-8 backdrop-blur-xl shadow-2xl text-center relative z-10 animate-fade-in">
+              <div className="w-16 h-16 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-indigo-500/5">
+                <Lock className="w-8 h-8 text-indigo-400" />
+              </div>
+              
+              <span className="text-[10px] font-black tracking-widest text-indigo-500 bg-indigo-500/10 px-3 py-1 rounded-full">
+                بوابة السوبر أدمن 👑
+              </span>
+              
+              <h1 className="text-xl font-black text-white mt-5">تعيين رمز الأمان مطلوب ⚙️</h1>
+              <p className="text-xs text-slate-400 mt-3 leading-relaxed font-semibold">
+                أهلاً بك! للدخول إلى لوحة التحكم الإدارية عبر رابط <code className="bg-slate-950 text-indigo-400 px-1.5 py-0.5 rounded font-mono">/admin</code> المباشر، يرجى أولاً تعيين <strong>رمز الأمان للدخول الإداري</strong> من داخل حسابك في صفحة <strong>الإعدادات ⚙️</strong> تحت قسم <strong>الحماية والخصوصية العائلية</strong>.
+              </p>
+
+              <div className="grid grid-cols-1 gap-4 mt-8 pt-6 border-t border-slate-800">
+                <button
+                  onClick={() => {
+                    window.location.href = '/';
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border border-indigo-500 shadow-lg shadow-indigo-600/15 animate-pulse"
+                >
+                  <Home className="w-4 h-4" />
+                  <span>الذهاب للتطبيق العائلي وتعيين الرمز</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // If passcode is set, show lock screen
       return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans" dir="rtl">
-          {/* Glowing error accent */}
-          <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-80 h-80 bg-red-900/10 rounded-full blur-[100px] pointer-events-none" />
+          <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-80 h-80 bg-blue-900/10 rounded-full blur-[100px] pointer-events-none" />
           
-          <div className="w-full max-w-lg bg-slate-900/70 border border-red-500/15 rounded-3xl p-8 backdrop-blur-xl shadow-2xl text-center relative z-10 animate-fade-in">
-            <div className="w-16 h-16 bg-red-500/10 border border-red-500/30 text-red-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-red-500/5">
-              <ShieldAlert className="w-8 h-8 animate-pulse" />
+          <div className="w-full max-w-md bg-slate-900/70 border border-blue-500/15 rounded-3xl p-8 backdrop-blur-xl shadow-2xl text-center relative z-10 animate-fade-in">
+            <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/5">
+              <ShieldCheck className="w-8 h-8 text-blue-400" />
             </div>
             
-            <span className="text-[10px] font-black tracking-widest text-red-500 uppercase bg-red-500/10 px-3 py-1 rounded-full">
-              خطأ 403: غير مسموح بالدخول (Forbidden)
+            <span className="text-[10px] font-black tracking-widest text-blue-500 bg-blue-500/10 px-3 py-1 rounded-full">
+              بوابة السوبر أدمن للتحكم 👑
             </span>
             
-            <h1 className="text-xl font-black text-white mt-5">بوابة المسؤولين المغلّقة 🔒</h1>
-            <p className="text-xs text-slate-400 mt-3 leading-relaxed font-semibold">
-              حسابك الحالي مسجل كـ <span className="text-red-400 font-bold">USER (عميل عادي)</span>. ليس لديك الصلاحيات الفنية لدخول لوحة التحكم الإدارية الخاصة بمالك تطبيق بيت AI ومساعديه.
+            <h1 className="text-xl font-black text-white mt-5">مطلوب رمز الأمان للدخول 🔒</h1>
+            <p className="text-xs text-slate-400 mt-2 font-medium">
+              الرجاء إدخال رمز الأمان المخصص الذي قمت بإنشائه في حسابك لفتح اللوحة فوراً.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 pt-6 border-t border-slate-800">
+            <form onSubmit={handleVerifyPasscode} className="mt-6 space-y-4">
+              <input
+                type="password"
+                placeholder="أدخل رمز الأمان الإداري الخاص بك"
+                value={passcodeGateInput}
+                onChange={(e) => setPasscodeGateInput(e.target.value)}
+                className="bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-xl px-4 py-3 text-sm text-center font-mono w-full focus:outline-none focus:ring-1 focus:ring-blue-500 text-white"
+                autoFocus
+              />
+              
+              {gateError && (
+                <p className="text-xs text-red-500 font-bold bg-red-500/5 py-2 px-3 rounded-xl border border-red-500/10">
+                  {gateError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isVerifyingGate}
+                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-600/15"
+              >
+                {isVerifyingGate ? 'جاري التحقق...' : 'فتح لوحة التحكم 🚀'}
+              </button>
+            </form>
+
+            <div className="mt-6 pt-4 border-t border-slate-800">
               <button
                 onClick={() => {
                   window.location.href = '/';
                 }}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border border-slate-700"
+                className="text-xs text-slate-400 hover:text-slate-300 flex items-center justify-center gap-1 mx-auto"
               >
-                <Home className="w-4 h-4" />
-                <span>الرجوع لتطبيق بيت AI العائلي</span>
-              </button>
-              
-              <button
-                onClick={() => navigateTo('/admin/login')}
-                className="bg-red-600 hover:bg-red-500 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-600/15"
-              >
-                <Lock className="w-4 h-4" />
-                <span>تسجيل الدخول كمسؤول</span>
+                <Home className="w-3.5 h-3.5" />
+                <span>الرجوع للتطبيق العائلي</span>
               </button>
             </div>
           </div>
@@ -250,7 +331,6 @@ export default function AdminPortal() {
     }
 
     // Otherwise, they are an unauthenticated visitor, redirect to /admin/login
-    // We execute this seamlessly by forcing them to render the Login page.
     return <AdminLogin onLoginSuccess={handleLoginSuccess} />;
   }
 
