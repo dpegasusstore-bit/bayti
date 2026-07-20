@@ -24,33 +24,33 @@ export default function DashboardView({ usersCount, premiumCount, revenueThisMon
 
   // Growth metrics with relative percentages
   const stats = [
-    { id: 'tot_users', name: 'إجمالي المستخدمين', value: (usersCount + 14810).toLocaleString(), change: '+12.4%', isPositive: true, icon: Users, color: 'text-blue-400 bg-blue-500/10' },
-    { id: 'act_users', name: 'النشطون اليوم', value: '2,415', change: '+18.1%', isPositive: true, icon: Clock, color: 'text-indigo-400 bg-indigo-500/10' },
-    { id: 'prem_users', name: 'المشتركون Premium', value: (premiumCount + 1430).toLocaleString(), change: '+5.7%', isPositive: true, icon: Award, color: 'text-amber-400 bg-amber-500/10' },
-    { id: 'rev_month', name: 'الإيرادات الشهرية', value: `${(revenueThisMonth + 185200).toLocaleString()} ج.م`, change: '+24.3%', isPositive: true, icon: DollarSign, color: 'text-emerald-400 bg-emerald-500/10' },
-    { id: 'rev_day', name: 'الإيرادات اليومية', value: '18,250 ج.م', change: '-2.1%', isPositive: false, icon: DollarSign, color: 'text-emerald-500 bg-emerald-500/10' },
-    { id: 'ai_reqs', name: 'طلبات الذكاء الاصطناعي', value: (aiUsageCount + 42100).toLocaleString(), change: '+32.8%', isPositive: true, icon: Brain, color: 'text-purple-400 bg-purple-500/10' },
-    { id: 'scans', name: 'مسح الفواتير بالـ OCR', value: '28,140', change: '+15.2%', isPositive: true, icon: Scan, color: 'text-cyan-400 bg-cyan-500/10' },
-    { id: 'voice_reqs', name: 'الطلبات الصوتية', value: '17,070', change: '+41.3%', isPositive: true, icon: Mic, color: 'text-pink-400 bg-pink-500/10' },
-    { id: 'storage', name: 'المساحة المستخدمة', value: '14.2 GB', change: '+8.4%', isPositive: true, icon: HardDrive, color: 'text-orange-400 bg-orange-500/10' },
-    { id: 'avg_session', name: 'متوسط الجلسة', value: '8 د و 42 ث', change: '+4.5%', isPositive: true, icon: Clock, color: 'text-sky-400 bg-sky-500/10' },
-    { id: 'retention', name: 'نسبة الاحتفاظ بالعملاء', value: '89.2%', change: '+1.2%', isPositive: true, icon: Percent, color: 'text-teal-400 bg-teal-500/10' },
-    { id: 'churn', name: 'معدل إلغاء الاشتراك', value: '2.1%', change: '-0.4%', isPositive: true, icon: AlertTriangle, color: 'text-red-400 bg-red-500/10' },
+    { id: 'tot_users', name: 'إجمالي المستخدمين', value: usersCount.toLocaleString(), change: '0%', isPositive: true, icon: Users, color: 'text-blue-400 bg-blue-500/10' },
+    { id: 'act_users', name: 'النشطون اليوم', value: usersCount.toLocaleString(), change: '0%', isPositive: true, icon: Clock, color: 'text-indigo-400 bg-indigo-500/10' },
+    { id: 'prem_users', name: 'المشتركون Premium', value: premiumCount.toLocaleString(), change: '0%', isPositive: true, icon: Award, color: 'text-amber-400 bg-amber-500/10' },
+    { id: 'rev_month', name: 'الإيرادات الشهرية', value: `${revenueThisMonth.toLocaleString()} ج.م`, change: '0%', isPositive: true, icon: DollarSign, color: 'text-emerald-400 bg-emerald-500/10' },
+    { id: 'rev_day', name: 'الإيرادات اليومية', value: '0 ج.م', change: '0%', isPositive: true, icon: DollarSign, color: 'text-emerald-500 bg-emerald-500/10' },
+    { id: 'ai_reqs', name: 'طلبات الذكاء الاصطناعي', value: aiUsageCount.toLocaleString(), change: '0%', isPositive: true, icon: Brain, color: 'text-purple-400 bg-purple-500/10' },
+    { id: 'scans', name: 'مسح الفواتير بالـ OCR', value: '0', change: '0%', isPositive: true, icon: Scan, color: 'text-cyan-400 bg-cyan-500/10' },
+    { id: 'voice_reqs', name: 'الطلبات الصوتية', value: '0', change: '0%', isPositive: true, icon: Mic, color: 'text-pink-400 bg-pink-500/10' },
+    { id: 'storage', name: 'المساحة المستخدمة', value: '0.0 GB', change: '0%', isPositive: true, icon: HardDrive, color: 'text-orange-400 bg-orange-500/10' },
+    { id: 'avg_session', name: 'متوسط الجلسة', value: '-', change: '0%', isPositive: true, icon: Clock, color: 'text-sky-400 bg-sky-500/10' },
+    { id: 'retention', name: 'نسبة الاحتفاظ بالعملاء', value: '0.0%', change: '0%', isPositive: true, icon: Percent, color: 'text-teal-400 bg-teal-500/10' },
+    { id: 'churn', name: 'معدل إلغاء الاشتراك', value: '0.0%', change: '0%', isPositive: true, icon: AlertTriangle, color: 'text-red-400 bg-red-500/10' },
   ];
 
   // Daily Active Users Chart Data (7 days)
   const dauData = [
-    { label: 'السبت', value: 1850, rev: 12400 },
-    { label: 'الأحد', value: 1980, rev: 15300 },
-    { label: 'الإثنين', value: 2150, rev: 11200 },
-    { label: 'الثلاثاء', value: 2415, rev: 18250 },
-    { label: 'الأربعاء', value: 2310, rev: 14900 },
-    { label: 'الخميس', value: 2580, rev: 21000 },
-    { label: 'الجمعة', value: 2890, rev: 24500 },
+    { label: 'السبت', value: 0, rev: 0 },
+    { label: 'الأحد', value: 0, rev: 0 },
+    { label: 'الإثنين', value: 0, rev: 0 },
+    { label: 'الثلاثاء', value: 0, rev: 0 },
+    { label: 'الأربعاء', value: 0, rev: 0 },
+    { label: 'الخميس', value: 0, rev: 0 },
+    { label: 'الجمعة', value: 0, rev: 0 },
   ];
 
-  const maxVal = Math.max(...dauData.map(d => d.value));
-  const maxRev = Math.max(...dauData.map(d => d.rev));
+  const maxVal = Math.max(1, ...dauData.map(d => d.value));
+  const maxRev = Math.max(1, ...dauData.map(d => d.rev));
 
   return (
     <div className="space-y-8 text-right font-sans">

@@ -136,20 +136,23 @@ export default function App() {
             // Pull active records from the persistent cloud database
             const dataRes = await api.pullData();
             if (dataRes.success) {
-              if (dataRes.expenses && dataRes.expenses.length > 0) {
-                setExpenses(dataRes.expenses);
-                lastSyncedRef.current.expenses = JSON.stringify(dataRes.expenses);
-              }
-              if (dataRes.familyMembers && dataRes.familyMembers.length > 0) {
-                setFamilyMembers(dataRes.familyMembers);
-                lastSyncedRef.current.familyMembers = JSON.stringify(dataRes.familyMembers);
-              }
-              if (dataRes.reminders && dataRes.reminders.length > 0) {
-                setReminders(dataRes.reminders);
-              }
-              if (dataRes.notifications && dataRes.notifications.length > 0) {
-                setSmartNotifications(dataRes.notifications);
-              }
+              const cloudExpenses = dataRes.expenses || [];
+              setExpenses(cloudExpenses);
+              lastSyncedRef.current.expenses = JSON.stringify(cloudExpenses);
+              localStorage.setItem('bayti_expenses', JSON.stringify(cloudExpenses));
+
+              const cloudMembers = dataRes.familyMembers || [];
+              setFamilyMembers(cloudMembers);
+              lastSyncedRef.current.familyMembers = JSON.stringify(cloudMembers);
+              localStorage.setItem('bayti_members', JSON.stringify(cloudMembers));
+
+              const cloudReminders = dataRes.reminders || [];
+              setReminders(cloudReminders);
+              localStorage.setItem('bayti_reminders', JSON.stringify(cloudReminders));
+
+              const cloudNotifications = dataRes.notifications || [];
+              setSmartNotifications(cloudNotifications);
+              localStorage.setItem('bayti_smart_notifications', JSON.stringify(cloudNotifications));
             }
           } else {
             // Token expired or invalid
@@ -336,68 +339,6 @@ export default function App() {
     localStorage.setItem('bayti_current_member', data.name);
 
     const initialExpenses: Expense[] = [];
-    
-    if (data.homeStatus === 'rent') {
-      initialExpenses.push({
-        id: 'exp_rent',
-        title: 'إيجار المنزل الشهري 🏠',
-        amount: 3500,
-        date: new Date().toISOString().split('T')[0],
-        time: '١٢:٠٠ م',
-        category: 'Home',
-        merchant: 'مالك العقار',
-        paymentMethod: 'Cash',
-        recordedBy: data.name,
-        notes: 'تم الخصم تلقائياً كإيجار مالي مجدول',
-        tags: ['سكن', 'إيجار', 'البيت']
-      });
-    }
-
-    if (data.ownsCar && data.paysInstallments) {
-      initialExpenses.push({
-        id: 'exp_car',
-        title: 'قسط السيارة الشهري للبنك 🚗',
-        amount: 2350,
-        date: new Date().toISOString().split('T')[0],
-        time: '٠١:٠٠ م',
-        category: 'Transportation',
-        merchant: 'البنك الأهلي المصري',
-        paymentMethod: 'Card',
-        recordedBy: data.name,
-        notes: 'تم الخصم التلقائي لقسط تمويل السيارة',
-        tags: ['سيارة', 'قسط', 'البنك']
-      });
-    }
-
-    if (data.participatesInGroup) {
-      initialExpenses.push({
-        id: 'exp_group',
-        title: 'قسط الجمعية الشهرية الدورية 👥',
-        amount: 1000,
-        date: new Date().toISOString().split('T')[0],
-        time: '١٠:٠٠ ص',
-        category: 'Bills',
-        merchant: 'منسق الجمعية',
-        paymentMethod: 'Wallet',
-        recordedBy: data.name,
-        notes: 'المستحق الشهري لجمعية الأقارب والأصدقاء',
-        tags: ['جمعية', 'ادخار', 'أقارب']
-      });
-    }
-
-    initialExpenses.push({
-      id: 'exp_groceries',
-      title: 'شراء لوازم البيت والطلبات الأسبوعية 🥬',
-      amount: 1420,
-      date: new Date().toISOString().split('T')[0],
-      time: '٠٤:١٥ م',
-      category: 'Home',
-      merchant: 'كارفور هايبر ماركت',
-      paymentMethod: 'Card',
-      recordedBy: data.name,
-      notes: 'شراء مستلزمات بقالة متكاملة بخصم فيزا',
-      tags: ['بقالة', 'كارفور', 'سوبرماركت']
-    });
 
     setExpenses(initialExpenses);
     localStorage.setItem('bayti_expenses', JSON.stringify(initialExpenses));

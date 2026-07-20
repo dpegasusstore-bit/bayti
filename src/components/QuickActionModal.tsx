@@ -123,41 +123,57 @@ export default function QuickActionModal({
   };
 
   const sendVoiceToAI = async (blob: Blob) => {
+    if (!blob || blob.size === 0) {
+      setError('التسجيل الصوتي فارغ. يرجى التحدث بوضوح وإعادة المحاولة.');
+      return;
+    }
+
     setLoading(true);
     setLoadingText('جارٍ معالجة الصوت واستخراج البيانات المالية بالذكاء الاصطناعي...');
+    setError(null);
+    setSuccessExpense(null);
     
     try {
       const reader = new FileReader();
       reader.readAsDataURL(blob);
       reader.onloadend = async () => {
-        const base64Audio = reader.result as string;
-        
-        const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
-        const response = await fetch('/api/ai/parse-voice', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            audio: base64Audio,
-            mimeType: 'audio/webm',
-            recordedBy: currentMember
-          })
-        });
+        try {
+          const base64Audio = reader.result as string;
+          
+          const token = localStorage.getItem('bayti_user_token') || localStorage.getItem('bayti_admin_token') || '';
+          const response = await fetch('/api/ai/parse-voice', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              audio: base64Audio,
+              mimeType: 'audio/webm',
+              recordedBy: currentMember
+            })
+          });
 
-        const data = await response.json();
-        if (data.success && data.expense) {
-          setSuccessExpense(data.expense);
-          onAddExpense(data.expense);
-        } else {
-          throw new Error(data.error || 'لم يتمكن الذكاء الاصطناعي من فهم التسجيل بوضوح');
+          if (!response.ok) {
+            throw new Error(`فشل الخادم في معالجة الصوت (رمز الاستجابة: ${response.status})`);
+          }
+
+          const data = await response.json();
+          if (data.success && data.expense) {
+            setSuccessExpense(data.expense);
+          } else {
+            throw new Error(data.error || 'لم يتمكن الذكاء الاصطناعي من فهم التسجيل بوضوح');
+          }
+        } catch (err: any) {
+          console.error('[sendVoiceToAI Async Error]:', err);
+          setError(err.message || 'حدث خطأ أثناء الاتصال بالخادم لتحليل الصوت');
+        } finally {
+          setLoading(false);
         }
       };
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'حدث خطأ أثناء معالجة الملف الصوتي');
-    } finally {
+      console.error('[sendVoiceToAI Synchronous Error]:', err);
+      setError('حدث خطأ أثناء قراءة الملف الصوتي المسجل');
       setLoading(false);
     }
   };
@@ -169,7 +185,19 @@ export default function QuickActionModal({
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      
+      let options: any = {};
+      if (typeof MediaRecorder.isTypeSupported === 'function') {
+        if (MediaRecorder.isTypeSupported('audio/webm')) {
+          options = { mimeType: 'audio/webm' };
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          options = { mimeType: 'audio/mp4' };
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          options = { mimeType: 'audio/ogg' };
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -179,7 +207,8 @@ export default function QuickActionModal({
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const mimeTypeUsed = mediaRecorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeTypeUsed });
         setAudioBlob(audioBlob);
         sendVoiceToAI(audioBlob);
         
@@ -190,8 +219,8 @@ export default function QuickActionModal({
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err: any) {
-      console.error(err);
-      setError('لم نتمكن من الوصول للميكروفون. يرجى تفعيل الصلاحية أو استخدام خيار "الجمل الجاهزة" لتجربة الذكاء الاصطناعي.');
+      console.error('[startRecording error]:', err);
+      setError('لم نتمكن من الوصول للميكروفون أو تشغيل خدمة التسجيل. يرجى تفعيل الصلاحية أو استخدام خيار "الجمل الجاهزة" لتجربة الذكاء الاصطناعي.');
     }
   };
 
@@ -268,7 +297,6 @@ export default function QuickActionModal({
       const data = await response.json();
       if (data.success && data.expense) {
         setSuccessExpense(data.expense);
-        onAddExpense(data.expense);
       } else {
         throw new Error(data.error || 'فشل في تحليل الجملة');
       }
@@ -310,7 +338,6 @@ export default function QuickActionModal({
       const data = await response.json();
       if (data.success && data.expense) {
         setSuccessExpense(data.expense);
-        onAddExpense(data.expense);
       } else {
         throw new Error(data.error || 'فشل محاكاة الصوت');
       }
@@ -360,7 +387,6 @@ export default function QuickActionModal({
       const data = await response.json();
       if (data.success && data.expense) {
         setSuccessExpense(data.expense);
-        onAddExpense(data.expense);
       } else {
         throw new Error(data.error || 'لم نتمكن من قراءة الفاتورة، يرجى التأكد من وضوح الصورة');
       }
@@ -757,10 +783,17 @@ export default function QuickActionModal({
                     ✏️ تصحيح البيانات المكتشفة
                   </button>
                   <button
-                    onClick={() => setSuccessExpense(null)}
-                    className="bg-emerald-600 text-white px-5 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-100"
+                    onClick={() => {
+                      if (successExpense) {
+                        onAddExpense(successExpense);
+                      }
+                      setSuccessExpense(null);
+                      onClose();
+                    }}
+                    className="bg-emerald-600 text-white px-5 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-100 flex items-center gap-1.5"
+                    id="btn_confirm_and_save"
                   >
-                    حسناً، رائع
+                    تأكيد وحفظ المصروف ✅
                   </button>
                 </div>
               )}

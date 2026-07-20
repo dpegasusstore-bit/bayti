@@ -258,6 +258,11 @@ model AIUsage {
   monthlyLimit   Int       @default(20)
   limitResetDate DateTime?
 
+  monthlyAiCredits   Int     @default(20)
+  usedAiCredits      Int     @default(0)
+  remainingAiCredits Int     @default(20)
+  lastResetMonth     String?
+
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 

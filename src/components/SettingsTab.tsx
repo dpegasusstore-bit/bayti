@@ -864,26 +864,37 @@ export default function SettingsTab({
             </p>
 
             {/* Progress bar */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex justify-between items-center text-[10px] font-black">
-                <span className="text-slate-500">الاستخدام الحالي للذكاء الاصطناعي:</span>
-                <span className="text-slate-800 dark:text-white font-mono">{(userProfile?.aiUsageCount || 0)} / ٢٠ عملية</span>
+                <span className="text-slate-500">رصيد الذكاء الاصطناعي المتبقي (AI Usage Remaining):</span>
+                <span className="text-slate-800 dark:text-white font-mono">
+                  {userProfile?.remainingAiCredits !== undefined ? userProfile.remainingAiCredits : (20 - (userProfile?.aiUsageCount || 0))} / {userProfile?.monthlyAiCredits || 20} عملية
+                </span>
               </div>
               <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                 <div 
                   className={`h-full rounded-full transition-all duration-500 ${
-                    (userProfile?.aiUsageCount || 0) >= 18 
+                    (userProfile?.remainingAiCredits !== undefined ? userProfile.remainingAiCredits : (20 - (userProfile?.aiUsageCount || 0))) <= 3 
                       ? 'bg-red-500' 
-                      : (userProfile?.aiUsageCount || 0) >= 12 
+                      : (userProfile?.remainingAiCredits !== undefined ? userProfile.remainingAiCredits : (20 - (userProfile?.aiUsageCount || 0))) <= 8 
                         ? 'bg-amber-500' 
-                        : 'bg-blue-600'
+                        : 'bg-emerald-500'
                   }`}
-                  style={{ width: `${Math.min(100, ((userProfile?.aiUsageCount || 0) / 20) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (((userProfile?.remainingAiCredits !== undefined ? userProfile.remainingAiCredits : (20 - (userProfile?.aiUsageCount || 0))) / (userProfile?.monthlyAiCredits || 20)) * 100))}%` }}
                 ></div>
               </div>
-              {userProfile?.limitResetDate && (
+
+              {/* Low credits alert warning */}
+              {(userProfile?.remainingAiCredits !== undefined ? userProfile.remainingAiCredits : (20 - (userProfile?.aiUsageCount || 0))) <= 3 && (
+                <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl p-3 text-[10px] font-black flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                  <span>تنبيه: رصيد عمليات الذكاء الاصطناعي منخفض جداً! يرجى الترقية لتجنب توقف التوجيه الصوتي وفحص الفواتير.</span>
+                </div>
+              )}
+
+              {userProfile?.lastResetMonth && (
                 <p className="text-[9px] text-slate-400 font-bold">
-                  سيتم إعادة تصفير حد الاستخدام تلقائياً في {new Date(userProfile.limitResetDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  تاريخ تجديد الرصيد الشهري الحالي: {userProfile.lastResetMonth} (يتم التجديد تلقائياً بداية كل شهر ميلادي)
                 </p>
               )}
             </div>

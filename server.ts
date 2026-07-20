@@ -50,6 +50,46 @@ app.use('/api', (req, res, next) => {
 // Register authentication & user management REST APIs
 registerAuthRoutes(app);
 
+// Helper to perform monthly reset of AI credits if needed
+async function ensureAiCreditsReset(userId: string): Promise<any> {
+  const currentMonthStr = new Date().toISOString().substring(0, 7); // e.g. "2026-07"
+  
+  // Try to find the AI usage
+  let usage = await prisma.aIUsage.findUnique({
+    where: { userId }
+  });
+
+  if (!usage) {
+    // If not found, create a new one
+    usage = await prisma.aIUsage.create({
+      data: {
+        userId,
+        requestsCount: 0,
+        tokensCount: 0,
+        monthlyLimit: 20,
+        monthlyAiCredits: 20,
+        usedAiCredits: 0,
+        remainingAiCredits: 20,
+        lastResetMonth: currentMonthStr,
+      }
+    });
+  } else if (usage.lastResetMonth !== currentMonthStr) {
+    // Reset to 20 at the beginning of every new month
+    usage = await prisma.aIUsage.update({
+      where: { userId },
+      data: {
+        monthlyAiCredits: 20,
+        usedAiCredits: 0,
+        remainingAiCredits: 20,
+        lastResetMonth: currentMonthStr,
+        requestsCount: 0, // also sync the legacy fields
+      }
+    });
+  }
+
+  return usage;
+}
+
 // Middleware to verify AI request limits
 async function verifyAiLimits(req: express.Request, res: express.Response, next: express.NextFunction) {
   try {
@@ -71,42 +111,15 @@ async function verifyAiLimits(req: express.Request, res: express.Response, next:
       return next();
     }
 
-    // Retrieve or create AI usage tracker
-    const usage = await prisma.aIUsage.upsert({
-      where: { userId: session.userId },
-      create: {
-        userId: session.userId,
-        requestsCount: 0,
-        tokensCount: 0,
-        monthlyLimit: 20,
-        limitResetDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
-      },
-      update: {},
-    });
+    // Perform monthly credit reset if needed
+    const usage = await ensureAiCreditsReset(session.userId);
 
-    // Check reset date for FREE tier (Standard)
-    const now = new Date();
-    const limitReset = usage.limitResetDate ? new Date(usage.limitResetDate) : null;
-    
-    if (!limitReset || limitReset < now) {
-      const nextReset = new Date();
-      nextReset.setMonth(nextReset.getMonth() + 1);
-      
-      await prisma.aIUsage.update({
-        where: { userId: session.userId },
-        data: {
-          requestsCount: 0,
-          limitResetDate: nextReset,
-        },
-      });
-      usage.requestsCount = 0;
-    }
-
-    if (usage.requestsCount >= usage.monthlyLimit) {
+    // If credits == 0, return friendly message
+    if (usage.remainingAiCredits <= 0) {
       return res.status(429).json({
         success: false,
         limitReached: true,
-        error: 'لقد استنفدت الحد الأقصى المجاني (20 عملية ذكاء اصطناعي شهرياً).\n\nقم بالترقية للباقة الممتازة Premium للتمتع باستخدام لانهائي وميزات متقدمة فوراً!',
+        error: 'لقد استنفدت الحد الأقصى المجاني للذكاء الاصطناعي (20 عملية شهرياً).\n\nيرجى الترقية إلى الباقة الممتازة Premium للحصول على استخدام لانهائي، أو الانتظار حتى بداية الشهر الجديد لإعادة شحن رصيدك تلقائياً.'
       });
     }
 
@@ -125,13 +138,19 @@ async function incrementAiUsage(userId: string | undefined) {
   try {
     const profile = await prisma.profile.findUnique({ where: { userId } });
     if (profile && profile.subscription !== 'Premium') {
+      const usage = await ensureAiCreditsReset(userId);
+      const newUsed = usage.usedAiCredits + 1;
+      const newRemaining = Math.max(0, usage.monthlyAiCredits - newUsed);
+      
       await prisma.aIUsage.update({
         where: { userId },
         data: {
-          requestsCount: { increment: 1 },
+          usedAiCredits: newUsed,
+          remainingAiCredits: newRemaining,
+          requestsCount: newUsed, // sync legacy requestsCount
         },
       });
-      console.log(`[AI Limit] Incremented usage for user ${userId}.`);
+      console.log(`[AI Limit] Incremented usage for user ${userId}. Remaining: ${newRemaining}`);
     }
   } catch (err) {
     console.error('Failed to increment AI usage count:', err);
@@ -145,40 +164,16 @@ async function checkUsageAndReturnIfAllowed(userId: string): Promise<{ allowed: 
     if (!profile) return { allowed: false, error: 'الملف الشخصي غير موجود.' };
     if (profile.subscription === 'Premium') return { allowed: true };
 
-    const usage = await prisma.aIUsage.upsert({
-      where: { userId },
-      create: {
-        userId,
-        requestsCount: 0,
-        tokensCount: 0,
-        monthlyLimit: 20,
-        limitResetDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
-      },
-      update: {},
-    });
+    const usage = await ensureAiCreditsReset(userId);
 
-    const now = new Date();
-    const limitReset = usage.limitResetDate ? new Date(usage.limitResetDate) : null;
-    if (!limitReset || limitReset < now) {
-      const nextReset = new Date();
-      nextReset.setMonth(nextReset.getMonth() + 1);
-      await prisma.aIUsage.update({
-        where: { userId },
-        data: {
-          requestsCount: 0,
-          limitResetDate: nextReset,
-        },
-      });
-      usage.requestsCount = 0;
-    }
-
-    if (usage.requestsCount >= usage.monthlyLimit) {
+    if (usage.remainingAiCredits <= 0) {
       return {
         allowed: false,
         limitReached: true,
-        error: 'لقد استنفدت الحد الأقصى المجاني (20 عملية ذكاء اصطناعي شهرياً).\n\nقم بالترقية للباقة الممتازة Premium للتمتع باستخدام لانهائي وميزات متقدمة فوراً!'
+        error: 'لقد استنفدت الحد الأقصى المجاني للذكاء الاصطناعي (20 عملية شهرياً).\n\nيرجى الترقية إلى الباقة الممتازة Premium للحصول على استخدام لانهائي، أو الانتظار حتى بداية الشهر الجديد لإعادة شحن رصيدك تلقائياً.'
       };
     }
+
     return { allowed: true };
   } catch (err) {
     console.error('Error checking AI limit allowed:', err);

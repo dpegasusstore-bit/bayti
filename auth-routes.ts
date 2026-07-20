@@ -1276,6 +1276,49 @@ export function registerAuthRoutes(app: express.Express) {
         return res.status(404).json({ success: false, error: 'المستخدم غير موجود.' });
       }
 
+      let aiUsageCount = 0;
+      let monthlyAiCredits = 20;
+      let usedAiCredits = 0;
+      let remainingAiCredits = 20;
+      let lastResetMonth = '';
+
+      const currentMonthStr = new Date().toISOString().substring(0, 7); // e.g. "2026-07"
+      let usage = await prisma.aIUsage.findUnique({
+        where: { userId: user.id }
+      });
+
+      if (!usage) {
+        usage = await prisma.aIUsage.create({
+          data: {
+            userId: user.id,
+            requestsCount: 0,
+            tokensCount: 0,
+            monthlyLimit: 20,
+            monthlyAiCredits: 20,
+            usedAiCredits: 0,
+            remainingAiCredits: 20,
+            lastResetMonth: currentMonthStr,
+          }
+        });
+      } else if (usage.lastResetMonth !== currentMonthStr) {
+        usage = await prisma.aIUsage.update({
+          where: { userId: user.id },
+          data: {
+            monthlyAiCredits: 20,
+            usedAiCredits: 0,
+            remainingAiCredits: 20,
+            lastResetMonth: currentMonthStr,
+            requestsCount: 0,
+          }
+        });
+      }
+
+      aiUsageCount = usage.usedAiCredits;
+      monthlyAiCredits = usage.monthlyAiCredits;
+      usedAiCredits = usage.usedAiCredits;
+      remainingAiCredits = usage.remainingAiCredits;
+      lastResetMonth = usage.lastResetMonth || currentMonthStr;
+
       res.json({
         success: true,
         user: {
@@ -1284,7 +1327,14 @@ export function registerAuthRoutes(app: express.Express) {
           role: user.role,
           verified: user.emailVerified,
         },
-        profile: user.profile,
+        profile: user.profile ? {
+          ...user.profile,
+          aiUsageCount,
+          monthlyAiCredits,
+          usedAiCredits,
+          remainingAiCredits,
+          lastResetMonth,
+        } : null,
         onboarding: user.onboarding || { onboardingCompleted: false },
         settings: user.settings || { theme: 'light', enableNotifications: true },
       });
