@@ -63,29 +63,154 @@ export default function UserAuth({ onLoginSuccess }: UserAuthProps) {
     }
   };
 
-  // 1. Google One-Tap Sign In (Simulation)
+  const [gsiLoaded, setGsiLoaded] = useState(false);
+
+  // 1. Real Google OAuth 2.0 Sign-In
+  React.useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      if (event.data && event.data.type === 'OAUTH_AUTH_SUCCESS') {
+        const { payload } = event.data;
+        if (payload && payload.success) {
+          setSuccess('تم تسجيل الدخول عبر Google بنجاح!');
+          setLoading(false);
+          setTimeout(() => {
+            onLoginSuccess(payload.token, payload.user, payload.profile, payload.onboarding, payload.settings);
+          }, 1000);
+        } else {
+          setError(payload?.error || 'فشل تسجيل الدخول عبر Google.');
+          setLoading(false);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+    return () => {
+      window.removeEventListener('message', handleAuthMessage);
+    };
+  }, [onLoginSuccess]);
+
+  // Google Identity Services (GSI) SDK initialization
+  React.useEffect(() => {
+    let interval: any;
+    const initGsi = async () => {
+      if (typeof window === 'undefined') return;
+      try {
+        const res = await fetch('/api/auth/google/config');
+        if (!res.ok) return;
+        const data = await res.json();
+        const clientId = data.clientId;
+
+        if (!clientId) {
+          console.warn('[GSI] Client ID is not configured on the server.');
+          return;
+        }
+
+        const google = (window as any).google;
+        if (google && google.accounts && google.accounts.id) {
+          google.accounts.id.initialize({
+            client_id: clientId,
+            callback: async (response: any) => {
+              setLoading(true);
+              setError('');
+              try {
+                const authRes = await fetch('/api/auth/google', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ idToken: response.credential })
+                });
+
+                const authData = await authRes.json();
+                if (authData.success) {
+                  setSuccess('تم تسجيل الدخول عبر Google بنجاح!');
+                  setTimeout(() => {
+                    onLoginSuccess(
+                      authData.token,
+                      authData.user,
+                      authData.profile,
+                      authData.onboarding,
+                      authData.settings
+                    );
+                  }, 1000);
+                } else {
+                  setError(authData.error || 'فشل التحقق من الهوية.');
+                }
+              } catch (err: any) {
+                setError('حدث خطأ أثناء الاتصال بالخادم لمصادقة Google.');
+              } finally {
+                setLoading(false);
+              }
+            },
+            auto_select: false,
+            itp_support: true,
+          });
+
+          setGsiLoaded(true);
+
+          const btnDiv = document.getElementById('gsiButton');
+          if (btnDiv) {
+            google.accounts.id.renderButton(btnDiv, {
+              theme: 'outline',
+              size: 'large',
+              text: 'continue_with',
+              shape: 'pill',
+              width: btnDiv.clientWidth || 320,
+              locale: 'ar'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to initialize Google Identity Services:', err);
+      }
+    };
+
+    interval = setInterval(() => {
+      const google = (window as any).google;
+      if (google && google.accounts && google.accounts.id) {
+        clearInterval(interval);
+        initGsi();
+      }
+    }, 500);
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [onLoginSuccess, view]);
+
   const handleGoogleLogin = async () => {
     setError('');
     setLoading(true);
     try {
-      // Create a simulated premium Cairo family user
-      const res = await api.oauthLogin({
-        email: 'mona.financial@gmail.com',
-        fullName: 'منى أحمد',
-        provider: 'google',
-        profilePicture: '👩🏻‍⚕️'
-      });
-      if (res.success) {
-        setSuccess('تم تسجيل الدخول عبر Google بنجاح!');
-        setTimeout(() => {
-          onLoginSuccess(res.token, res.user, res.profile, res.onboarding, res.settings);
-        }, 1000);
-      } else {
-        setError(res.error || 'فشل تسجيل الدخول عبر Google.');
+      const origin = window.location.origin;
+      const response = await fetch(`/api/auth/google/url?origin=${encodeURIComponent(origin)}`);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: 'فشل تهيئة تسجيل الدخول من Google.' }));
+        throw new Error(errData.error || 'فشل تهيئة تسجيل الدخول من Google.');
       }
-    } catch (err) {
-      setError('حدث خطأ في الاتصال بالخادم.');
-    } finally {
+      
+      const { url } = await response.json();
+      if (!url) {
+        throw new Error('لم يتم استلام رابط تسجيل الدخول من الخادم.');
+      }
+
+      const width = 500;
+      const height = 650;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+      
+      const authWindow = window.open(
+        url,
+        'google_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
+      );
+
+      if (!authWindow) {
+        setError('يرجى السماح بالنوافذ المنبثقة (Popups) للمتابعة عبر Google.');
+        setLoading(false);
+      }
+    } catch (err: any) {
+      setError(err.message || 'حدث خطأ في الاتصال بالخادم.');
       setLoading(false);
     }
   };
@@ -423,16 +548,22 @@ export default function UserAuth({ onLoginSuccess }: UserAuthProps) {
                 </div>
 
                 {/* Google Sign-in */}
-                <button
-                  onClick={handleGoogleLogin}
-                  disabled={loading}
-                  className="w-full py-4 bg-slate-50 hover:bg-slate-100 dark:bg-slate-950 dark:hover:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-3 cursor-pointer"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path fill="#EA4335" d="M12.24 10.285V14.4h6.887C18.2 16.632 15.657 18 12.24 18c-3.866 0-7-3.134-7-7s3.134-7 7-7c1.785 0 3.407.674 4.636 1.774l3.125-3.125C17.923 1.096 15.22 0 12.24 0c-6.075 0-11 4.925-11 11s4.925 11 11 11c5.808 0 10.74-4.172 10.74-11 0-.743-.075-1.455-.213-2.143H12.24z"/>
-                  </svg>
-                  <span>متابعة باستخدام Google</span>
-                </button>
+                <div className="flex flex-col items-center justify-center w-full gap-2">
+                  <div id="gsiButton" className="w-full flex justify-center min-h-[44px]"></div>
+                  {!gsiLoaded && (
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={loading}
+                      className="w-full py-4 bg-slate-50 hover:bg-slate-100 dark:bg-slate-950 dark:hover:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-3 cursor-pointer"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24">
+                        <path fill="#EA4335" d="M12.24 10.285V14.4h6.887C18.2 16.632 15.657 18 12.24 18c-3.866 0-7-3.134-7-7s3.134-7 7-7c1.785 0 3.407.674 4.636 1.774l3.125-3.125C17.923 1.096 15.22 0 12.24 0c-6.075 0-11 4.925-11 11s4.925 11 11 11c5.808 0 10.74-4.172 10.74-11 0-.743-.075-1.455-.213-2.143H12.24z"/>
+                      </svg>
+                      <span>متابعة باستخدام Google</span>
+                    </button>
+                  )}
+                </div>
 
                 <p className="text-center text-xs font-bold text-slate-400 dark:text-slate-500 pt-2">
                   ليس لديك حساب مالي؟{' '}

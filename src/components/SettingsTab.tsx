@@ -516,24 +516,13 @@ export default function SettingsTab({
         </div>
 
         {/* Action triggers */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           <button
             onClick={() => setIsEditingProfile(!isEditingProfile)}
             className="text-xs font-black text-blue-600 hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all bg-blue-50 hover:bg-blue-100 dark:bg-slate-800/50 px-4 py-2.5 rounded-xl border border-blue-50 dark:border-slate-800 w-full"
           >
             <Settings className="w-3.5 h-3.5" />
             <span>تعديل الملف وتغيير كلمة المرور</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              window.location.href = '/admin/login';
-            }}
-            className="text-xs font-black text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center justify-center gap-1.5 transition-all bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 px-4 py-2.5 rounded-xl border border-indigo-100 dark:border-indigo-900/20 w-full"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>لوحة تحكم السوبر أدمن 👑</span>
           </button>
 
           {onLogout && (

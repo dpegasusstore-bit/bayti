@@ -28,6 +28,158 @@ export function generateRefreshToken(user: { id: string; email: string; role: st
   );
 }
 
+export async function ensureOnlyOneSuperAdmin() {
+  try {
+    const adminEmail = 'admin@bayti-ai.com';
+    
+    // 1. Downgrade any other ADMIN or SUPER_ADMIN users to USER
+    await prisma.user.updateMany({
+      where: {
+        email: { not: adminEmail },
+        role: { in: ['ADMIN', 'SUPER_ADMIN'] }
+      },
+      data: {
+        role: 'USER'
+      }
+    });
+
+    // 2. Ensure admin@bayti-ai.com exists and has SUPER_ADMIN role
+    const adminUser = await prisma.user.findUnique({
+      where: { email: adminEmail }
+    });
+
+    if (!adminUser) {
+      const fallbackAdminPassword = process.env.ADMIN_PASSWORD || 'Admin@Bayti2026';
+      const passwordHash = hashPassword(fallbackAdminPassword);
+      const adminId = 'usr_super_admin_default';
+
+      await prisma.user.create({
+        data: {
+          id: adminId,
+          email: adminEmail,
+          emailVerified: true,
+          passwordHash,
+          role: 'SUPER_ADMIN',
+          profile: {
+            create: {
+              fullName: 'مدير النظام الرئيسي',
+              phone: '+201000000000',
+              country: 'مصر',
+              currency: 'EGP',
+              language: 'ar',
+              subscription: 'Premium',
+              profilePicture: '👑'
+            }
+          },
+          onboarding: {
+            create: {
+              onboardingCompleted: true,
+              salary: 100000,
+              otherIncome: 0,
+              familyMembersCount: 1,
+              ownsCar: true,
+              paysInstallments: false,
+              participatesInGroup: false,
+              homeStatus: 'own',
+              wantsGoals: true
+            }
+          },
+          settings: {
+            create: {
+              theme: 'dark',
+              enableNotifications: true,
+              betaFeatures: true
+            }
+          },
+          aiUsage: {
+            create: {
+              requestsCount: 0,
+              tokensCount: 0,
+              monthlyLimit: 100000
+            }
+          }
+        }
+      });
+      console.log(`[Super Admin] Created default SUPER_ADMIN user: ${adminEmail}`);
+    } else if (adminUser.role !== 'SUPER_ADMIN') {
+      await prisma.user.update({
+        where: { id: adminUser.id },
+        data: { role: 'SUPER_ADMIN' }
+      });
+      console.log(`[Super Admin] Restored SUPER_ADMIN role for: ${adminEmail}`);
+    }
+  } catch (err) {
+    console.error('[Super Admin Error] Failed to ensure only one super admin:', err);
+  }
+}
+
+export async function requireSuperAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    // 1. Enforce downgrades on system check
+    await ensureOnlyOneSuperAdmin();
+
+    // 2. Extract token from cookie or authorization header
+    let accessToken = req.cookies?.access_token;
+    if (!accessToken && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      accessToken = req.headers.authorization.substring(7);
+    }
+    
+    // In case AdminPortal passes it in another header, allow it
+    if (!accessToken) {
+      accessToken = (req.headers['x-access-token'] as string) || (req.headers['x-admin-token'] as string);
+    }
+
+    if (!accessToken) {
+      return res.status(403).json({ success: false, error: 'غير مسموح: لم يتم العثور على رمز الجلسة.' });
+    }
+
+    // 3. Verify JWT
+    let decoded: any;
+    try {
+      decoded = jwt.verify(accessToken, JWT_SECRET) as any;
+    } catch (err) {
+      return res.status(403).json({ success: false, error: 'غير مسموح: رمز الجلسة غير صالح أو منتهي الصلاحية.' });
+    }
+
+    if (!decoded || !decoded.userId || decoded.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, error: 'غير مسموح: لا تملك صلاحية مدير النظام الرئيسي.' });
+    }
+
+    // 4. Double check the user exists in PostgreSQL and is indeed SUPER_ADMIN
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId }
+    });
+
+    if (!user || user.role !== 'SUPER_ADMIN' || user.email.toLowerCase().trim() !== 'admin@bayti-ai.com') {
+      return res.status(403).json({ success: false, error: 'غير مسموح: صلاحية الحساب غير صالحة.' });
+    }
+
+    // 5. Verify active session in SessionStore matches and has not expired
+    const activeSession = await prisma.sessionStore.findFirst({
+      where: {
+        userId: user.id,
+        token: accessToken,
+        isActive: true,
+        expiresAt: { gt: new Date() }
+      }
+    });
+
+    if (!activeSession) {
+      return res.status(403).json({ success: false, error: 'غير مسموح: لا توجد جلسة نشطة مطابقة لمدير النظام.' });
+    }
+
+    // Attach to request object
+    (req as any).user = user;
+    (req as any).session = activeSession;
+    (req as any).userId = user.id;
+
+    next();
+  } catch (error) {
+    console.error('[requireSuperAdmin Error]:', error);
+    return res.status(403).json({ success: false, error: 'غير مسموح: حدث خطأ أثناء فحص صلاحيات السوبر أدمن.' });
+  }
+}
+
 export const COOKIE_OPTIONS: express.CookieOptions = {
   httpOnly: true,
   secure: true,
@@ -204,6 +356,15 @@ export function registerAuthRoutes(app: express.Express) {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
+
+      // Block registration of admin email or admin roles
+      if (normalizedEmail === 'admin@bayti-ai.com') {
+        return res.status(403).json({ success: false, error: 'غير مسموح بإنشاء حساب بهذا البريد الإلكتروني المحجوز للنظام.' });
+      }
+
+      if (req.body.role === 'ADMIN' || req.body.role === 'SUPER_ADMIN') {
+        return res.status(403).json({ success: false, error: 'غير مسموح بطلب صلاحيات إدارية أثناء التسجيل.' });
+      }
 
       // Check if user already exists
       const existingUser = await prisma.user.findUnique({
@@ -390,17 +551,135 @@ export function registerAuthRoutes(app: express.Express) {
     }
   });
 
-  // 3. Simulated Google / Apple Authentication (OAuth)
-  app.post('/api/auth/oauth-login', async (req, res) => {
+  // 3. Official Google Authentication (OAuth 2.0)
+  app.get('/api/auth/google/url', (req, res) => {
     try {
-      const { email, fullName, provider, profilePicture } = req.body;
-      if (!email || !fullName) {
-        return res.status(400).json({ success: false, error: 'بيانات الاعتماد غير مكتملة.' });
+      const origin = (req.query.origin as string) || process.env.APP_URL || 'http://localhost:3000';
+      const redirectUri = `${origin}/auth/callback`;
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+
+      if (!clientId) {
+        return res.status(500).json({ success: false, error: 'مفاتيح Google OAuth غير مهيأة على الخادم.' });
+      }
+
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'openid email profile',
+        prompt: 'select_account',
+        access_type: 'offline',
+      });
+
+      res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
+    } catch (err: any) {
+      console.error('Error generating Google OAuth URL:', err);
+      res.status(500).json({ success: false, error: 'فشل إنشاء رابط تسجيل الدخول.' });
+    }
+  });
+
+  // Google OAuth Popup Callback
+  app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+    const { code } = req.query;
+    if (!code) {
+      return res.send(`
+        <html>
+          <body>
+            <script>
+              alert('لم يتم توفير رمز التفويض من Google.');
+              window.close();
+            </script>
+          </body>
+        </html>
+      `);
+    }
+
+    try {
+      // Build origin from request headers to construct the correct redirectUri
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const origin = `${proto}://${host}`;
+      const redirectUri = `${origin}/auth/callback`;
+
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        throw new Error('Google OAuth credentials are not configured on the server.');
+      }
+
+      // Exchange authorize code for tokens
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: code as string,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const errText = await tokenResponse.text();
+        console.error('Google token exchange response error:', errText);
+        throw new Error(`Failed to exchange code for token: ${tokenResponse.statusText}`);
+      }
+
+      const tokenData = await tokenResponse.json() as { id_token?: string };
+      const idToken = tokenData.id_token;
+
+      if (!idToken) {
+        throw new Error('Google did not return an ID token.');
+      }
+
+      // Verify ID Token securely
+      const { OAuth2Client } = await import('google-auth-library');
+      const client = new OAuth2Client(clientId);
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: clientId,
+      });
+      const payload = ticket.getPayload();
+      if (!payload) {
+        throw new Error('Invalid ID Token payload received from Google.');
+      }
+
+      const googleId = payload.sub;
+      const email = payload.email;
+      const name = payload.name || 'مستخدم Google';
+      const picture = payload.picture || '👨🏻‍💼';
+      const emailVerified = payload.email_verified || false;
+
+      if (!email) {
+        throw new Error('Google account email is missing.');
       }
 
       const normalizedEmail = email.toLowerCase().trim();
-      let user = await prisma.user.findUnique({
-        where: { email: normalizedEmail },
+
+      // Block registration/login of admin email
+      if (normalizedEmail === 'admin@bayti-ai.com') {
+        return res.send(`
+          <html>
+            <body>
+              <script>
+                alert('غير مسموح بتسجيل الدخول بهذا الحساب كونه مخصصاً للإدارة فقط.');
+                window.close();
+              </script>
+            </body>
+          </html>
+        `);
+      }
+
+      // Look up user by googleId or email
+      let user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { googleId },
+            { email: normalizedEmail }
+          ]
+        },
         include: { profile: true, onboarding: true, settings: true },
       });
 
@@ -409,26 +688,28 @@ export function registerAuthRoutes(app: express.Express) {
       if (!user) {
         isFirstTime = true;
         const userId = 'usr_' + generateToken(12);
-        
+
         await prisma.$transaction([
           prisma.user.create({
             data: {
               id: userId,
               email: normalizedEmail,
-              role: 'USER', // Always register as USER, never ADMIN
-              emailVerified: true, // OAuth implies verified
+              role: 'USER',
+              emailVerified: emailVerified,
+              googleId,
+              provider: 'GOOGLE',
             },
           }),
           prisma.profile.create({
             data: {
               userId,
-              fullName,
+              fullName: name,
               phone: '',
               country: 'مصر',
               currency: 'EGP',
               language: 'ar',
               subscription: 'Standard',
-              profilePicture: profilePicture || '👨🏻‍💼',
+              profilePicture: picture,
             },
           }),
           prisma.onboarding.create({
@@ -467,11 +748,26 @@ export function registerAuthRoutes(app: express.Express) {
         user = await prisma.user.findUnique({
           where: { id: userId },
           include: { profile: true, onboarding: true, settings: true },
-        }) as any;
+        });
+      } else {
+        // Link Google if not yet linked
+        if (!user.googleId || user.provider !== 'GOOGLE') {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              googleId,
+              provider: 'GOOGLE',
+              emailVerified: true,
+            }
+          });
+          user.googleId = googleId;
+          user.provider = 'GOOGLE';
+          user.emailVerified = true;
+        }
       }
 
       if (!user) {
-        throw new Error('User creation failed');
+        throw new Error('Failed to find or create user account.');
       }
 
       // Extract device info
@@ -479,16 +775,16 @@ export function registerAuthRoutes(app: express.Express) {
       const { browser, platform, device } = parseUserAgent(userAgentStr);
       const ip = req.ip || '127.0.0.1';
 
-      // Create tokens
+      // Create JWT tokens
       const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
       const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
-      
+
       const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30); // Google login defaults to 30 days remember
+      expiresAt.setDate(expiresAt.getDate() + 30);
 
       await prisma.sessionStore.create({
         data: {
-          token: refreshToken, // Store the Refresh Token in the database
+          token: refreshToken,
           userId: user.id,
           expiresAt,
           isActive: true,
@@ -517,23 +813,258 @@ export function registerAuthRoutes(app: express.Express) {
         maxAge: 30 * 24 * 60 * 60 * 1000
       });
 
-      res.json({
+      const loginPayload = {
         success: true,
-        token: accessToken, // Return access token to keep full compatibility with localStorage/Bearer header
+        token: accessToken,
         isFirstTime,
         user: {
           id: user.id,
           email: user.email,
           role: user.role,
-          verified: true,
+          verified: user.emailVerified,
+        },
+        profile: user.profile,
+        onboarding: user.onboarding || { onboardingCompleted: false },
+        settings: user.settings || { theme: 'light', enableNotifications: true },
+      };
+
+      res.send(`
+        <html>
+          <body>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: 'OAUTH_AUTH_SUCCESS',
+                  payload: ${JSON.stringify(loginPayload)}
+                }, '*');
+                window.close();
+              } else {
+                window.location.href = '/';
+              }
+            </script>
+            <p dir="rtl" style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+              تم تسجيل الدخول بنجاح! جاري إغلاق النافذة...
+            </p>
+          </body>
+        </html>
+      `);
+    } catch (error: any) {
+      console.error('Google callback error:', error);
+      res.send(`
+        <html>
+          <body>
+            <script>
+              alert('فشل تسجيل الدخول باستخدام Google: ${error.message || error}');
+              window.close();
+            </script>
+          </body>
+        </html>
+      `);
+    }
+  });
+
+  // Endpoint to expose public Google Client ID securely to the client-side
+  app.get('/api/auth/google/config', (req, res) => {
+    res.json({ clientId: process.env.GOOGLE_CLIENT_ID });
+  });
+
+  // Backend verification endpoint for client-rendered One-Tap or ID tokens
+  app.post(['/api/auth/google', '/api/auth/oauth-login'], async (req, res) => {
+    try {
+      const { idToken } = req.body;
+      if (!idToken) {
+        return res.status(400).json({ success: false, error: 'لم يتم توفير رمز الهوية ID Token.' });
+      }
+
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        return res.status(500).json({ success: false, error: 'مفاتيح Google OAuth غير مهيأة على الخادم.' });
+      }
+
+      const { OAuth2Client } = await import('google-auth-library');
+      const client = new OAuth2Client(clientId);
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: clientId,
+      });
+      const payload = ticket.getPayload();
+      if (!payload) {
+        return res.status(401).json({ success: false, error: 'رمز الهوية المستلم غير صالح.' });
+      }
+
+      const googleId = payload.sub;
+      const email = payload.email;
+      const name = payload.name || 'مستخدم Google';
+      const picture = payload.picture || '👨🏻‍💼';
+      const emailVerified = payload.email_verified || false;
+
+      if (!email) {
+        return res.status(400).json({ success: false, error: 'البريد الإلكتروني للرمز غير متوفر.' });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+
+      // Block registration/login of admin email
+      if (normalizedEmail === 'admin@bayti-ai.com') {
+        return res.status(403).json({ success: false, error: 'غير مسموح بتسجيل الدخول بهذا الحساب كونه مخصصاً للإدارة فقط.' });
+      }
+
+      let user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { googleId },
+            { email: normalizedEmail }
+          ]
+        },
+        include: { profile: true, onboarding: true, settings: true },
+      });
+
+      let isFirstTime = false;
+
+      if (!user) {
+        isFirstTime = true;
+        const userId = 'usr_' + generateToken(12);
+
+        await prisma.$transaction([
+          prisma.user.create({
+            data: {
+              id: userId,
+              email: normalizedEmail,
+              role: 'USER',
+              emailVerified: emailVerified,
+              googleId,
+              provider: 'GOOGLE',
+            },
+          }),
+          prisma.profile.create({
+            data: {
+              userId,
+              fullName: name,
+              phone: '',
+              country: 'مصر',
+              currency: 'EGP',
+              language: 'ar',
+              subscription: 'Standard',
+              profilePicture: picture,
+            },
+          }),
+          prisma.onboarding.create({
+            data: {
+              userId,
+              onboardingCompleted: false,
+              salary: 0,
+              otherIncome: 0,
+              familyMembersCount: 1,
+              ownsCar: false,
+              paysInstallments: false,
+              participatesInGroup: false,
+              homeStatus: 'own',
+              wantsGoals: true,
+            },
+          }),
+          prisma.settings.create({
+            data: {
+              userId,
+              theme: 'light',
+              enableNotifications: true,
+              betaFeatures: false,
+            },
+          }),
+          prisma.aIUsage.create({
+            data: {
+              userId,
+              requestsCount: 0,
+              tokensCount: 0,
+              monthlyLimit: 20,
+              limitResetDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
+            },
+          }),
+        ]);
+
+        user = await prisma.user.findUnique({
+          where: { id: userId },
+          include: { profile: true, onboarding: true, settings: true },
+        });
+      } else {
+        // Link Google if not yet linked
+        if (!user.googleId || user.provider !== 'GOOGLE') {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              googleId,
+              provider: 'GOOGLE',
+              emailVerified: true,
+            }
+          });
+          user.googleId = googleId;
+          user.provider = 'GOOGLE';
+          user.emailVerified = true;
+        }
+      }
+
+      if (!user) {
+        throw new Error('User creation failed');
+      }
+
+      // Extract device info
+      const userAgentStr = req.headers['user-agent'] || '';
+      const { browser, platform, device } = parseUserAgent(userAgentStr);
+      const ip = req.ip || '127.0.0.1';
+
+      // Create tokens
+      const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
+      const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
+
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
+
+      await prisma.sessionStore.create({
+        data: {
+          token: refreshToken,
+          userId: user.id,
+          expiresAt,
+          isActive: true,
+          device,
+          platform,
+          browser,
+          ip,
+          country: 'Egypt',
+        },
+      });
+
+      // Update last login
+      await prisma.profile.update({
+        where: { userId: user.id },
+        data: { lastLogin: new Date() },
+      });
+
+      res.cookie('access_token', accessToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: 15 * 60 * 1000 // 15 minutes
+      });
+
+      res.cookie('refresh_token', refreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      });
+
+      res.json({
+        success: true,
+        token: accessToken,
+        isFirstTime,
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          verified: user.emailVerified,
         },
         profile: user.profile,
         onboarding: user.onboarding || { onboardingCompleted: false },
         settings: user.settings || { theme: 'light', enableNotifications: true },
       });
     } catch (error: any) {
-      console.error('OAuth Login error:', error);
-      res.status(500).json({ success: false, error: 'حدث خطأ أثناء تسجيل الدخول بحساب Google.' });
+      console.error('Google verification error:', error);
+      res.status(401).json({ success: false, error: 'فشل التحقق من رمز Google.' });
     }
   });
 
@@ -1324,10 +1855,16 @@ export function registerAuthRoutes(app: express.Express) {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
+      if (normalizedEmail !== 'admin@bayti-ai.com') {
+        return res.status(403).json({ success: false, error: 'غير مسموح: لا تملك صلاحية الوصول الإداري.' });
+      }
+
+      await ensureOnlyOneSuperAdmin();
+
       const user = await prisma.user.findFirst({
         where: {
           email: normalizedEmail,
-          role: { in: ['ADMIN', 'SUPER_ADMIN'] }
+          role: 'SUPER_ADMIN'
         }
       });
 
@@ -1340,9 +1877,8 @@ export function registerAuthRoutes(app: express.Express) {
         isPasswordCorrect = verifyPassword(password, user.passwordHash);
       } else {
         // Fallback for default seed admin if they have no passwordHash stored in DB
-        const fallbackAdminEmail = process.env.ADMIN_EMAIL || 'admin@bayti-ai.com';
         const fallbackAdminPassword = process.env.ADMIN_PASSWORD || 'Admin@Bayti2026';
-        if (normalizedEmail === fallbackAdminEmail.toLowerCase().trim() && password === fallbackAdminPassword) {
+        if (password === fallbackAdminPassword) {
           isPasswordCorrect = true;
         }
       }
@@ -1367,51 +1903,10 @@ export function registerAuthRoutes(app: express.Express) {
 
   // Verify customizable admin passcode set by user in standard settings
   app.post('/api/admin/auth/verify-passcode', async (req, res) => {
-    try {
-      const session = await getSessionFromRequest(req);
-      if (!session) {
-        return res.status(401).json({ success: false, error: 'يرجى تسجيل الدخول بحسابك أولاً.' });
-      }
-
-      const { passcode } = req.body;
-      if (!passcode) {
-        return res.status(400).json({ success: false, error: 'يرجى إدخال رمز الأمان.' });
-      }
-
-      const userId = session.userId;
-      const settings = await prisma.settings.findUnique({
-        where: { userId }
-      });
-
-      if (!settings || !settings.adminPasscode) {
-        return res.status(400).json({ success: false, error: 'يرجى تعيين رمز الأمان للدخول الإداري أولاً من إعدادات حسابك.' });
-      }
-
-      if (settings.adminPasscode.trim() !== passcode.trim()) {
-        return res.status(401).json({ success: false, error: 'رمز الأمان للدخول الإداري غير صحيح.' });
-      }
-
-      // Promote user to SUPER_ADMIN to allow accessing all admin APIs with their existing token!
-      const updatedUser = await prisma.user.update({
-        where: { id: userId },
-        data: { role: 'SUPER_ADMIN' },
-        include: { profile: true }
-      });
-
-      res.json({
-        success: true,
-        message: 'تم تفعيل صلاحيات الإدارة بنجاح.',
-        user: {
-          id: updatedUser.id,
-          email: updatedUser.email,
-          role: updatedUser.role,
-        },
-        profile: updatedUser.profile,
-      });
-    } catch (error: any) {
-      console.error('Verify admin passcode error:', error);
-      res.status(500).json({ success: false, error: 'حدث خطأ أثناء التحقق من رمز الأمان.' });
-    }
+    return res.status(403).json({
+      success: false,
+      error: 'تم إيقاف هذا المسار البرمجي نهائياً لتعزيز الحماية الأمنية ومنع تصعيد الصلاحيات.'
+    });
   });
 
   // Admin 2FA Code Verification
@@ -1422,46 +1917,30 @@ export function registerAuthRoutes(app: express.Express) {
         return res.status(400).json({ success: false, error: 'رمز التحقق الثنائي (2FA) غير صحيح، يرجى المحاولة مجدداً.' });
       }
 
-      const adminEmail = email || process.env.ADMIN_EMAIL || 'admin@bayti-ai.com';
+      const adminEmail = 'admin@bayti-ai.com';
+      await ensureOnlyOneSuperAdmin();
       
       let user = await prisma.user.findFirst({
         where: { 
-          email: { equals: adminEmail, mode: 'insensitive' }, 
-          role: { in: ['ADMIN', 'SUPER_ADMIN'] } 
+          email: adminEmail, 
+          role: 'SUPER_ADMIN' 
         },
         include: { profile: true },
       });
 
       if (!user) {
-        // Fallback seed admin
-        const adminId = 'usr_admin_default';
-        await prisma.$transaction([
-          prisma.user.upsert({
-            where: { email: adminEmail.toLowerCase().trim() },
-            create: { id: adminId, email: adminEmail.toLowerCase().trim(), role: 'ADMIN', emailVerified: true },
-            update: { role: 'ADMIN' },
-          }),
-          prisma.profile.upsert({
-            where: { userId: adminId },
-            create: { userId: adminId, fullName: 'مدير النظام (Admin)', phone: '+201000000000', subscription: 'Premium' },
-            update: { subscription: 'Premium' },
-          }),
-        ]);
-
-        user = await prisma.user.findFirst({
-          where: { 
-            email: { equals: adminEmail, mode: 'insensitive' }, 
-            role: { in: ['ADMIN', 'SUPER_ADMIN'] } 
-          },
-          include: { profile: true },
-        });
+        return res.status(403).json({ success: false, error: 'غير مسموح: حساب مدير النظام الرئيسي غير موجود.' });
       }
 
-      const sessionToken = 'sess_admin_' + generateToken(24);
+      // Create JWT tokens
+      const accessToken = generateAccessToken({ id: user.id, email: user.email, role: 'SUPER_ADMIN' });
+      const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: 'SUPER_ADMIN' });
+
+      // Save JWT access token to SessionStore so it matches our strict token checks!
       await prisma.sessionStore.create({
         data: {
-          token: sessionToken,
-          userId: user!.id,
+          token: accessToken,
+          userId: user.id,
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
           isActive: true,
           device: 'PC Admin Portal',
@@ -1469,15 +1948,26 @@ export function registerAuthRoutes(app: express.Express) {
         },
       });
 
+      // Set cookies with SameSite=None and Secure for iframe safety
+      res.cookie('access_token', accessToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours for admin
+      });
+
+      res.cookie('refresh_token', refreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+      });
+
       res.json({
         success: true,
-        token: sessionToken,
+        token: accessToken,
         user: {
-          id: user!.id,
-          email: user!.email,
-          role: user!.role,
+          id: user.id,
+          email: user.email,
+          role: user.role,
         },
-        profile: user!.profile,
+        profile: user.profile,
       });
     } catch (error: any) {
       console.error('Verify 2fa error:', error);
@@ -1485,19 +1975,9 @@ export function registerAuthRoutes(app: express.Express) {
     }
   });
 
-  // 16. Admin Stats Dashboard API (Requires Admin Role Checking)
-  app.get('/api/admin/stats', async (req, res) => {
+  // 16. Admin Stats Dashboard API (Requires Super Admin Role Checking)
+  app.get('/api/admin/stats', requireSuperAdmin, async (req, res) => {
     try {
-      const session = await getSessionFromRequest(req);
-      if (!session) {
-        return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة.' });
-      }
-
-      const currentUser = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'SUPER_ADMIN')) {
-        return res.status(403).json({ success: false, error: 'الدخول محظور! ليس لديك صلاحيات إدارية (403 Forbidden).' });
-      }
-
       // Generate analytics from tables in PostgreSQL
       const totalUsersCount = await prisma.user.count({ where: { role: 'USER' } });
       const totalSubscribedUsersCount = await prisma.profile.count({ where: { subscription: 'Premium' } });
@@ -1625,19 +2105,32 @@ export function registerAuthRoutes(app: express.Express) {
   });
 
   // Admin Change User Role / Subscription
-  app.post('/api/admin/users/update', async (req, res) => {
+  app.post('/api/admin/users/update', requireSuperAdmin, async (req, res) => {
     try {
-      const session = await getSessionFromRequest(req);
-      if (!session) {
-        return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة.' });
-      }
-
-      const currentUser = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'SUPER_ADMIN')) {
-        return res.status(403).json({ success: false, error: 'الدخول محظور! ليس لديك صلاحيات إدارية.' });
-      }
-
       const { userId, role, subscription } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({ success: false, error: 'معرف المستخدم مطلوب.' });
+      }
+
+      // Find the target user to verify they aren't the super admin
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId }
+      });
+
+      if (!targetUser) {
+        return res.status(404).json({ success: false, error: 'المستخدم غير موجود.' });
+      }
+
+      // Block any changes to the main super admin
+      if (targetUser.email.toLowerCase().trim() === 'admin@bayti-ai.com') {
+        return res.status(403).json({ success: false, error: 'غير مسموح: لا يمكن تعديل حساب مدير النظام الرئيسي.' });
+      }
+
+      // Block promoting any other user to ADMIN or SUPER_ADMIN
+      if (role && (role === 'ADMIN' || role === 'SUPER_ADMIN')) {
+        return res.status(403).json({ success: false, error: 'غير مسموح: لا يمكن تعيين حسابات إدارية أخرى. مسموح بمدير نظام واحد فقط.' });
+      }
 
       if (role) {
         await prisma.user.update({
@@ -1791,18 +2284,8 @@ export function registerAuthRoutes(app: express.Express) {
   });
 
   // 20. Admin Action on Upgrade Requests (Approve or Reject Payment Proofs)
-  app.post('/api/admin/subscription/action', async (req, res) => {
+  app.post('/api/admin/subscription/action', requireSuperAdmin, async (req, res) => {
     try {
-      const session = await getSessionFromRequest(req);
-      if (!session) {
-        return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة.' });
-      }
-
-      const currentUser = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'SUPER_ADMIN')) {
-        return res.status(403).json({ success: false, error: 'غير مسموح لك بإجراء تعديلات إدارية.' });
-      }
-
       const { requestId, action, rejectionReason } = req.body;
       
       const proof = await prisma.paymentProof.findUnique({ where: { id: requestId } });
@@ -1853,18 +2336,8 @@ export function registerAuthRoutes(app: express.Express) {
   });
 
   // 21. Admin Update Global Configurations
-  app.post('/api/admin/config/update', async (req, res) => {
+  app.post('/api/admin/config/update', requireSuperAdmin, async (req, res) => {
     try {
-      const session = await getSessionFromRequest(req);
-      if (!session) {
-        return res.status(419).json({ success: false, error: 'انتهت صلاحية الجلسة.' });
-      }
-
-      const currentUser = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'SUPER_ADMIN')) {
-        return res.status(403).json({ success: false, error: 'غير مسموح لك بإجراء تعديلات إدارية.' });
-      }
-
       const { monthlyPrice, yearlyPrice, vodafoneNumber, featureFlags } = req.body;
 
       await prisma.systemConfig.upsert({

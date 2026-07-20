@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import cookieParser from 'cookie-parser';
 import { prisma } from './db-store.js';
-import { registerAuthRoutes, getSessionFromRequest } from './auth-routes.js';
+import { registerAuthRoutes, getSessionFromRequest, requireSuperAdmin, ensureOnlyOneSuperAdmin } from './auth-routes.js';
 import { aiService } from './server/ai-service.js';
 import { uploadFile } from './server/storage-service.js';
 import { localParseText, localParseReceiptOCR, cleanVoiceTranscript, learnCorrection } from './server/smart-dictionary.js';
@@ -797,16 +797,8 @@ app.get('/api/export', requireAuth, async (req, res) => {
 });
 
 // 8. Admin Backup Statistics
-app.get('/api/admin/backup-stats', requireAuth, async (req, res) => {
+app.get('/api/admin/backup-stats', requireSuperAdmin, async (req, res) => {
   try {
-    const userId = (req as any).userId;
-    
-    // Verify admin role in database
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'admin') {
-      return res.status(403).json({ success: false, error: 'غير مصرح: هذه الإحصائيات متاحة لمديري النظام فقط.' });
-    }
-
     // Aggregate statistics from the Backup table
     const [totalBackups, backupTypes, sizeStats, backupsCountByUser] = await Promise.all([
       prisma.backup.count(),
@@ -916,6 +908,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Vite Dev Server / Production Static File setup
 async function startServer() {
+  // Ensure we have exactly one Super Admin account created and any others downgraded
+  await ensureOnlyOneSuperAdmin();
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
