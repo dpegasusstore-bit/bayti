@@ -197,6 +197,7 @@ const expenseExtractionSystemInstruction = `
     "category": "Home" | "Shopping" | "Restaurants" | "Transportation" | "Bills" | "Health" | "Education" | "Travel" | "Entertainment" | "Work",
     "merchant": "Merchant name in Arabic or 'غير محدد'",
     "paymentMethod": "Cash" | "Card" | "Wallet",
+    "date": "YYYY-MM-DD" (Optional: Extract ONLY if a specific date is mentioned or explicitly printed on the receipt. Otherwise, omit this field),
     "vat": number (defaults to 0),
     "items": [{"name": "Item name in Arabic", "price": number}],
     "notes": "Any extra notes in Arabic",
@@ -236,6 +237,7 @@ export class GeminiProvider implements AIProvider {
         merchant: { type: Type.STRING },
         paymentMethod: { type: Type.STRING },
         vat: { type: Type.NUMBER },
+        date: { type: Type.STRING },
         items: {
           type: Type.ARRAY,
           items: {

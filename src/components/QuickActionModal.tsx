@@ -19,6 +19,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Expense, CategoryType } from '../types';
+import { getLocalDateString, getLocalTimeString } from '../utils';
 
 interface QuickActionModalProps {
   isOpen: boolean;
@@ -150,7 +151,9 @@ export default function QuickActionModal({
             body: JSON.stringify({
               audio: base64Audio,
               mimeType: 'audio/webm',
-              recordedBy: currentMember
+              recordedBy: currentMember,
+              localDate: getLocalDateString(),
+              localTime: getLocalTimeString()
             })
           });
 
@@ -290,7 +293,9 @@ export default function QuickActionModal({
         },
         body: JSON.stringify({ 
           text: textToParse, 
-          recordedBy: currentMember 
+          recordedBy: currentMember,
+          localDate: getLocalDateString(),
+          localTime: getLocalTimeString()
         }),
       });
 
@@ -331,7 +336,9 @@ export default function QuickActionModal({
         },
         body: JSON.stringify({ 
           text: phrase, 
-          recordedBy: currentMember 
+          recordedBy: currentMember,
+          localDate: getLocalDateString(),
+          localTime: getLocalTimeString()
         }),
       });
 
@@ -380,7 +387,9 @@ export default function QuickActionModal({
         },
         body: JSON.stringify({
           image: base64Image,
-          recordedBy: currentMember
+          recordedBy: currentMember,
+          localDate: getLocalDateString(),
+          localTime: getLocalTimeString()
         })
       });
 

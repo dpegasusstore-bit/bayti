@@ -28,7 +28,7 @@ import {
   Target
 } from 'lucide-react';
 import { Expense, AIInsight, FamilyMember } from '../types';
-import { CATEGORY_DETAILS, formatCurrency } from '../utils';
+import { CATEGORY_DETAILS, formatCurrency, getLocalDateString } from '../utils';
 import SmartCalendar from './SmartCalendar';
 import FinancialGoals from './FinancialGoals';
 import AIAdvisorChat from './AIAdvisorChat';
@@ -197,7 +197,7 @@ export default function HomeTab({
         <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-3 rounded-2xl flex flex-col justify-between shadow-xs col-span-2">
           <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">المنفق اليوم</span>
           <p className="text-sm font-black text-slate-800 dark:text-white mt-1 font-mono">
-            {formatCurrency(expenses.filter(e => e.date === new Date().toISOString().split('T')[0]).reduce((a, b) => a + b.amount, 0))}
+            {formatCurrency(expenses.filter(e => e.date === getLocalDateString()).reduce((a, b) => a + b.amount, 0))}
           </p>
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-3 rounded-2xl flex flex-col justify-between shadow-xs col-span-2">

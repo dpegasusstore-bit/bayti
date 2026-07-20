@@ -160,3 +160,42 @@ export const INITIAL_REMINDERS: SmartReminder[] = [];
 // Initial Smart Notifications
 export const INITIAL_SMART_NOTIFICATIONS: SmartNotification[] = [];
 
+/**
+ * Returns local YYYY-MM-DD date string using browser's active timezone.
+ */
+export function getLocalDateString(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Returns local time string with Arabic AM/PM (ص/م).
+ */
+export function getLocalTimeString(date = new Date()): string {
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'م' : 'ص';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // standard 12-hour format
+  return `${hours}:${minutes} ${ampm}`;
+}
+
+/**
+ * Standard date string validation to prevent invalid dates from being stored.
+ */
+export function isValidDateString(dateStr?: string): boolean {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (year < 2000 || year > 2100) return false;
+  if (month < 1 || month > 12) return false;
+  const dateObj = new Date(year, month - 1, day);
+  return dateObj.getFullYear() === year && dateObj.getMonth() === month - 1 && dateObj.getDate() === day;
+}
+
+

@@ -18,7 +18,7 @@ import {
   Area 
 } from 'recharts';
 import { Expense, FamilyMember } from '../types';
-import { CATEGORY_DETAILS, formatCurrency } from '../utils';
+import { CATEGORY_DETAILS, formatCurrency, getLocalDateString } from '../utils';
 import { PieChart as PieIcon, BarChart3, TrendingUp, DollarSign, Wallet, Award } from 'lucide-react';
 
 interface ReportsTabProps {
@@ -79,7 +79,7 @@ export default function ReportsTab({ expenses, familyMembers }: ReportsTabProps)
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = getLocalDateString(d);
     last7DaysMap[dateStr] = 0;
   }
 

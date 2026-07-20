@@ -19,7 +19,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { Expense, CategoryType } from '../types';
-import { CATEGORY_DETAILS, PAYMENT_METHODS, formatCurrency } from '../utils';
+import { CATEGORY_DETAILS, PAYMENT_METHODS, formatCurrency, getLocalDateString, getLocalTimeString, isValidDateString } from '../utils';
 
 interface ExpensesTabProps {
   expenses: Expense[];
@@ -49,17 +49,27 @@ export default function ExpensesTab({
   const [newPaymentMethod, setNewPaymentMethod] = useState<'Cash' | 'Card' | 'Wallet'>('Cash');
   const [newRecordedBy, setNewRecordedBy] = useState(familyMembers[0] || 'أحمد');
   const [newNotes, setNewNotes] = useState('');
+  const [newDate, setNewDate] = useState(getLocalDateString());
+  const [newTime, setNewTime] = useState(getLocalTimeString());
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Submit manual expense
   const handleAddManual = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newAmount) return;
 
+    if (!isValidDateString(newDate)) {
+      setFormError('يرجى إدخال تاريخ صحيح بصيغة YYYY-MM-DD');
+      return;
+    }
+    setFormError(null);
+
     const expense: Expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
       title: newTitle,
       amount: Number(newAmount),
-      date: new Date().toISOString().split('T')[0],
+      date: newDate,
+      time: newTime,
       category: newCategory,
       merchant: newMerchant || 'غير محدد',
       paymentMethod: newPaymentMethod,
@@ -75,6 +85,8 @@ export default function ExpensesTab({
     setNewAmount('');
     setNewMerchant('');
     setNewNotes('');
+    setNewDate(getLocalDateString());
+    setNewTime(getLocalTimeString());
     setShowManualForm(false);
   };
 
@@ -190,7 +202,34 @@ export default function ExpensesTab({
                 ))}
               </select>
             </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">تاريخ العملية *</label>
+              <input
+                type="date"
+                required
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+                className="w-full p-2.5 text-xs border border-slate-200 rounded-xl focus:border-[#2563EB] outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">وقت العملية *</label>
+              <input
+                type="text"
+                required
+                value={newTime}
+                onChange={(e) => setNewTime(e.target.value)}
+                placeholder="مثال: 02:45 م"
+                className="w-full p-2.5 text-xs border border-slate-200 rounded-xl focus:border-[#2563EB] outline-none"
+              />
+            </div>
           </div>
+
+          {formError && (
+            <div className="bg-red-50 border border-red-100 text-red-600 rounded-xl p-3 text-xs font-bold">
+              {formError}
+            </div>
+          )}
 
           <div>
             <label className="block text-[11px] font-bold text-slate-500 mb-1">ملاحظات إضافية</label>

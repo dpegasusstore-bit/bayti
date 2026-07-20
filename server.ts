@@ -50,6 +50,35 @@ app.use('/api', (req, res, next) => {
 // Register authentication & user management REST APIs
 registerAuthRoutes(app);
 
+// Timezone-aware validation & fallback date/time helpers
+function isValidDateString(dateStr: string | null | undefined): boolean {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (year < 2000 || year > 2100) return false;
+  if (month < 1 || month > 12) return false;
+  const dateObj = new Date(year, month - 1, day);
+  return dateObj.getFullYear() === year && dateObj.getMonth() === month - 1 && dateObj.getDate() === day;
+}
+
+function getFallbackDateTime(req: any) {
+  let date = req.body.localDate;
+  let time = req.body.localTime;
+  
+  if (!isValidDateString(date)) {
+    date = new Date().toISOString().split('T')[0];
+  }
+  
+  if (!time || typeof time !== 'string') {
+    time = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+  
+  return { date, time };
+}
+
 // Helper to perform monthly reset of AI credits if needed
 async function ensureAiCreditsReset(userId: string): Promise<any> {
   const currentMonthStr = new Date().toISOString().substring(0, 7); // e.g. "2026-07"
@@ -233,13 +262,16 @@ app.post('/api/ai/parse-text', async (req, res) => {
       await incrementAiUsage(userId);
     }
 
-    const localTime = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const fallback = getFallbackDateTime(req);
+    const finalDate = isValidDateString(finalResult.date) ? finalResult.date : fallback.date;
+    const finalTime = fallback.time;
+
     const expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
       title: finalResult.title,
       amount: finalResult.amount,
-      date: new Date().toISOString().split('T')[0],
-      time: localTime,
+      date: finalDate,
+      time: finalTime,
       category: finalResult.category,
       merchant: finalResult.merchant,
       paymentMethod: finalResult.paymentMethod,
@@ -372,13 +404,16 @@ app.post('/api/ai/parse-receipt', async (req, res) => {
       }
     }
 
-    const localTime = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const fallback = getFallbackDateTime(req);
+    const finalDate = isValidDateString(finalResult.date) ? finalResult.date : fallback.date;
+    const finalTime = fallback.time;
+
     const expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
       title: finalResult.title || `فاتورة من ${finalResult.merchant || 'محل'}`,
       amount: finalResult.amount,
-      date: new Date().toISOString().split('T')[0],
-      time: localTime,
+      date: finalDate,
+      time: finalTime,
       category: finalResult.category || 'Home',
       merchant: finalResult.merchant,
       paymentMethod: finalResult.paymentMethod,
@@ -477,13 +512,16 @@ app.post('/api/ai/parse-voice', async (req, res) => {
     // Increment AI usage once (since we did at least one AI transcription)
     await incrementAiUsage(userId);
 
-    const localTime = new Date().toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const fallback = getFallbackDateTime(req);
+    const finalDate = isValidDateString(finalResult.date) ? finalResult.date : fallback.date;
+    const finalTime = fallback.time;
+
     const expense = {
       id: 'exp_' + Math.random().toString(36).substr(2, 9),
       title: finalResult.title || 'تسجيل صوتي مالي',
       amount: finalResult.amount,
-      date: new Date().toISOString().split('T')[0],
-      time: localTime,
+      date: finalDate,
+      time: finalTime,
       category: finalResult.category || 'Home',
       merchant: finalResult.merchant,
       paymentMethod: finalResult.paymentMethod,

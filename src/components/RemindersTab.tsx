@@ -39,7 +39,7 @@ import {
   X
 } from 'lucide-react';
 import { SmartReminder, SmartNotification, Expense, FamilyMember } from '../types';
-import { formatCurrency, CATEGORY_DETAILS } from '../utils';
+import { formatCurrency, CATEGORY_DETAILS, getLocalDateString, isValidDateString } from '../utils';
 
 interface RemindersTabProps {
   reminders: SmartReminder[];
@@ -79,7 +79,7 @@ export default function RemindersTab({
   const [showAddForm, setShowAddForm] = useState(false);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [dueDate, setDueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dueDate, setDueDate] = useState(getLocalDateString());
   const [repeatType, setRepeatType] = useState<'one-time' | 'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [priority, setPriority] = useState<'high' | 'medium' | 'low'>('medium');
   const [category, setCategory] = useState('bill_electricity');
@@ -216,7 +216,7 @@ export default function RemindersTab({
       dueDate,
       repeatType,
       priority,
-      status: new Date(dueDate) < new Date(new Date().toISOString().split('T')[0]) ? 'missed' : 'upcoming',
+      status: new Date(dueDate) < new Date(getLocalDateString()) ? 'missed' : 'upcoming',
       category,
       notes
     };
@@ -234,7 +234,7 @@ export default function RemindersTab({
       id: 'rem_' + Math.random().toString(36).substr(2, 9),
       title: sug.suggestedReminder.title,
       amount: sug.suggestedReminder.amount,
-      dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0], // Due in 3 days
+      dueDate: getLocalDateString(new Date(Date.now() + 86400000 * 3)), // Due in 3 days
       repeatType: sug.suggestedReminder.repeatType,
       priority: sug.suggestedReminder.priority,
       status: 'upcoming',
@@ -271,7 +271,7 @@ export default function RemindersTab({
           id: 'exp_' + Math.random().toString(36).substr(2, 9),
           title: `سداد: ${rem.title}`,
           amount: rem.amount,
-          date: new Date().toISOString().split('T')[0],
+          date: getLocalDateString(),
           category: 'Bills',
           merchant: rem.notes || 'سداد فواتير عائلية',
           paymentMethod: 'Wallet',
@@ -285,14 +285,14 @@ export default function RemindersTab({
 
   // SUMMARIES DYNAMIC CALCULATION
   const totalSpentToday = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     return expenses.filter(e => e.date === todayStr).reduce((a, b) => a + b.amount, 0);
   }, [expenses]);
 
   const tomorrowReminders = useMemo(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomStr = tomorrow.toISOString().split('T')[0];
+    const tomStr = getLocalDateString(tomorrow);
     return reminders.filter(r => r.dueDate === tomStr && r.status === 'upcoming');
   }, [reminders]);
 
